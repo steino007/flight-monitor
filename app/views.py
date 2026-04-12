@@ -127,6 +127,11 @@ def manual_check():
         flights = fetch_schedules(route["origin"], route["destination"], route["airline"])
         total_flights += len(flights)
         for f in flights:
+            flight_date = today
+            dep_time = f.get("dep_time", "")
+            if dep_time and " " in dep_time:
+                flight_date = dep_time.split(" ")[0]
+
             db.execute("""
                 INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, status)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -134,9 +139,9 @@ def manual_check():
                 DO UPDATE SET status=excluded.status, dep_time=excluded.dep_time,
                              arr_time=excluded.arr_time, checked_at=CURRENT_TIMESTAMP
             """, (
-                route["id"], today,
+                route["id"], flight_date,
                 f.get("flight_iata", ""),
-                f.get("dep_time", ""),
+                dep_time,
                 f.get("arr_time", ""),
                 f.get("status", "unknown"),
             ))

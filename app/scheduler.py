@@ -18,6 +18,12 @@ def check_all_routes():
         flights = fetch_schedules(route["origin"], route["destination"], route["airline"])
         total_flights += len(flights)
         for f in flights:
+            # Use flight's departure date, fallback to today
+            flight_date = today
+            dep_time = f.get("dep_time", "")
+            if dep_time and " " in dep_time:
+                flight_date = dep_time.split(" ")[0]
+
             conn.execute("""
                 INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, status)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -25,9 +31,9 @@ def check_all_routes():
                 DO UPDATE SET status=excluded.status, dep_time=excluded.dep_time,
                              arr_time=excluded.arr_time, checked_at=CURRENT_TIMESTAMP
             """, (
-                route["id"], today,
+                route["id"], flight_date,
                 f.get("flight_iata", ""),
-                f.get("dep_time", ""),
+                dep_time,
                 f.get("arr_time", ""),
                 f.get("status", "unknown"),
             ))
@@ -44,5 +50,4 @@ def start_scheduler(app):
     scheduler = BackgroundScheduler()
     scheduler.add_job(check_all_routes, "cron", hour=6, minute=0, id="check_morning")
     scheduler.add_job(check_all_routes, "cron", hour=14, minute=0, id="check_afternoon")
-    scheduler.add_job(check_all_routes, "cron", hour=20, minute=0, id="check_evening")
     scheduler.start()
