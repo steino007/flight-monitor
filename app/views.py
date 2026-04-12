@@ -1,7 +1,7 @@
 import json
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from flask import Blueprint, render_template, request, redirect, url_for, session
+from flask import Blueprint, render_template, request, redirect, url_for, session, jsonify
 from app.db import get_db
 from app.auth import login_required, check_password
 from app.airlabs import fetch_schedules
@@ -9,13 +9,24 @@ from app.airlabs import fetch_schedules
 bp = Blueprint("main", __name__)
 
 STATUS_DISPLAY = {
-    "scheduled": "🕐 Scheduled",
-    "active": "🛫 Departed",
-    "landed": "✅ Arrived",
-    "cancelled": "❌ Cancelled",
-    "unknown": "❓ Unknown",
-    "probably_landed": "🟡 Waarschijnlijk geland",
+    "scheduled": "Scheduled",
+    "active": "Departed",
+    "landed": "Arrived",
+    "cancelled": "Cancelled",
+    "unknown": "Unknown",
+    "probably_landed": "Wsrl. geland",
 }
+
+STATUS_ICON = {
+    "scheduled": "🕐",
+    "active": "🛫",
+    "landed": "✅",
+    "cancelled": "❌",
+    "unknown": "❓",
+    "probably_landed": "🟡",
+}
+
+NL_TZ = ZoneInfo("Europe/Amsterdam")
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -38,47 +49,76 @@ def logout():
 @login_required
 def dashboard():
     db = get_db()
-    date_filter = request.args.get("date", date.today().isoformat())
+    today_str = date.today().isoformat()
+    date_filter = request.args.get("date", today_str)
 
-    flights = db.execute("""
-        SELECT f.*, r.origin, r.destination, r.airline
-        FROM flights f
-        JOIN routes r ON f.route_id = r.id
-        WHERE f.date = ?
-        ORDER BY f.dep_time ASC, r.origin ASC
-    """, (date_filter,)).fetchall()
-
-    routes = db.execute("SELECT * FROM routes ORDER BY created_at").fetchall()
+    routes = db.execute("SELECT * FROM routes ORDER BY origin, destination").fetchall()
 
     last_check = db.execute(
         "SELECT checked_at, routes_checked, flights_found, source FROM check_log ORDER BY id DESC LIMIT 1"
     ).fetchone()
 
-    # Format flights for display
-    flight_list = []
-    for f in flights:
-        status = f["status"]
-        status_display = STATUS_DISPLAY.get(status, status)
+    # Route summary cards
+    route_cards = []
+    for r in routes:
+        route_name = f"{r['origin']} → {r['destination']}"
+        today_count = db.execute(
+            "SELECT COUNT(*) as cnt FROM flights WHERE route_id = ? AND date = ?",
+            (r["id"], date_filter),
+        ).fetchone()["cnt"]
 
-        flight_list.append({
-            "date": f["date"],
-            "origin": f["origin"],
-            "destination": f["destination"],
-            "airline": f["airline"],
+        # 7-day sparkline
+        spark_rows = db.execute("""
+            SELECT date, COUNT(*) as cnt FROM flights
+            WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ?
+            GROUP BY date ORDER BY date
+        """, (r["id"], today_str, today_str)).fetchall()
+        sparkline = [row["cnt"] for row in spark_rows]
+
+        trend = _calc_trend(db, r["id"], today_str)
+
+        route_cards.append({
+            "id": r["id"],
+            "name": route_name,
+            "origin": r["origin"],
+            "destination": r["destination"],
+            "airline": r["airline"] or "",
+            "today_count": today_count,
+            "sparkline": sparkline,
+            "trend": trend,
+        })
+
+    # Flights grouped by route
+    flights = db.execute("""
+        SELECT f.*, r.origin, r.destination, r.airline
+        FROM flights f
+        JOIN routes r ON f.route_id = r.id
+        WHERE f.date = ?
+        ORDER BY r.origin ASC, r.destination ASC, f.dep_time ASC
+    """, (date_filter,)).fetchall()
+
+    flight_groups = {}
+    for f in flights:
+        route_name = f"{f['origin']} → {f['destination']}"
+        if route_name not in flight_groups:
+            flight_groups[route_name] = []
+
+        status_raw = f["status"]
+        flight_groups[route_name].append({
             "flight_iata": f["flight_iata"],
             "dep_time": _format_time(f["dep_time"]),
             "arr_time": _format_time(f["arr_time"]),
-            "status": status_display,
-            "status_raw": status,
-            "checked_at": _utc_to_nl(f["checked_at"]),
+            "status": STATUS_DISPLAY.get(status_raw, status_raw),
+            "status_icon": STATUS_ICON.get(status_raw, ""),
+            "status_raw": status_raw,
         })
 
     return render_template(
         "dashboard.html",
-        flights=flight_list,
-        routes=routes,
+        route_cards=route_cards,
+        flight_groups=flight_groups,
         date_filter=date_filter,
-        today=date.today().isoformat(),
+        today=today_str,
         last_check={
             "checked_at": _utc_to_nl(last_check["checked_at"]),
             "routes_checked": last_check["routes_checked"],
@@ -86,6 +126,38 @@ def dashboard():
             "source": last_check["source"],
         } if last_check else None,
     )
+
+
+@bp.route("/api/trend")
+@login_required
+def trend_api():
+    db = get_db()
+    days = min(int(request.args.get("days", 7)), 90)
+    today_str = date.today().isoformat()
+
+    routes = db.execute("SELECT * FROM routes ORDER BY origin, destination").fetchall()
+    result = {}
+
+    for r in routes:
+        route_name = f"{r['origin']} → {r['destination']}"
+        rows = db.execute("""
+            SELECT date, COUNT(*) as cnt FROM flights
+            WHERE route_id = ? AND date >= date(?, ?) AND date <= ?
+            GROUP BY date ORDER BY date
+        """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
+        result[route_name] = {row["date"]: row["cnt"] for row in rows}
+
+    all_dates = []
+    for i in range(days - 1, -1, -1):
+        d = (date.today() - timedelta(days=i)).isoformat()
+        all_dates.append(d)
+
+    for route_name in result:
+        for d in all_dates:
+            if d not in result[route_name]:
+                result[route_name][d] = 0
+
+    return jsonify({"dates": all_dates, "routes": result})
 
 
 @bp.route("/routes", methods=["GET", "POST"])
@@ -105,7 +177,7 @@ def manage_routes():
             db.commit()
             return redirect(url_for("main.manage_routes"))
 
-    routes = db.execute("SELECT * FROM routes ORDER BY created_at").fetchall()
+    routes = db.execute("SELECT * FROM routes ORDER BY origin, destination").fetchall()
     return render_template("routes.html", routes=routes)
 
 
@@ -121,7 +193,6 @@ def delete_route(route_id):
 @bp.route("/check-all", methods=["POST"])
 @login_required
 def manual_check():
-    """Trigger a manual check for all routes."""
     db = get_db()
     routes = db.execute("SELECT * FROM routes").fetchall()
     today = date.today().isoformat()
@@ -179,11 +250,35 @@ def manual_check():
     return redirect(url_for("main.dashboard"))
 
 
-NL_TZ = ZoneInfo("Europe/Amsterdam")
+# --- Helpers ---
+
+def _calc_trend(db, route_id, today_str):
+    """Compare recent 3 days avg vs previous 3 days avg. Returns 'up', 'down', 'stable', or 'new'."""
+    rows = db.execute("""
+        SELECT date, COUNT(*) as cnt FROM flights
+        WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ?
+        GROUP BY date ORDER BY date
+    """, (route_id, today_str, today_str)).fetchall()
+
+    if len(rows) < 2:
+        return "new"
+
+    counts = [r["cnt"] for r in rows]
+    mid = len(counts) // 2
+    recent = sum(counts[mid:]) / max(len(counts[mid:]), 1)
+    earlier = sum(counts[:mid]) / max(len(counts[:mid]), 1)
+
+    if earlier == 0:
+        return "new"
+    change = (recent - earlier) / earlier
+    if change < -0.2:
+        return "down"
+    elif change > 0.2:
+        return "up"
+    return "stable"
 
 
 def _format_time(time_str):
-    """Extract HH:MM from datetime string like '2026-04-12 08:30'."""
     if not time_str:
         return "—"
     if " " in time_str:
@@ -191,23 +286,11 @@ def _format_time(time_str):
     return time_str[:5]
 
 
-def _is_past(arr_time_utc_str, now_utc):
-    """Check if a flight's UTC arrival time is in the past."""
-    if not arr_time_utc_str:
-        return False
-    try:
-        arr_utc = datetime.fromisoformat(arr_time_utc_str).replace(tzinfo=timezone.utc)
-        return now_utc > arr_utc
-    except (ValueError, TypeError):
-        return False
-
-
 def _utc_to_nl(timestamp_str):
-    """Convert UTC timestamp string to Dutch time string."""
     if not timestamp_str:
         return "—"
     try:
         dt = datetime.fromisoformat(timestamp_str).replace(tzinfo=timezone.utc)
-        return dt.astimezone(NL_TZ).strftime("%Y-%m-%d %H:%M")
+        return dt.astimezone(NL_TZ).strftime("%d %b %H:%M")
     except (ValueError, TypeError):
         return timestamp_str

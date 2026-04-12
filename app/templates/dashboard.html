@@ -1,52 +1,240 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="actions">
-    <form method="GET" style="display:flex; gap:0.5rem; align-items:center;">
-        <label for="date">Datum:</label>
-        <input type="date" id="date" name="date" value="{{ date_filter }}">
-        <button class="btn btn-primary btn-sm" type="submit">Filter</button>
-    </form>
-    <span style="flex:1"></span>
+
+<!-- Header -->
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
+    <div>
+        <h1 style="font-size:1.35rem; font-weight:700;">Dashboard</h1>
+        {% if last_check %}
+        <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">
+            Laatste check: {{ last_check.checked_at }} ({{ last_check.source }}) — {{ last_check.routes_checked }} routes, {{ last_check.flights_found }} vluchten
+        </p>
+        {% endif %}
+    </div>
     <form method="POST" action="{{ url_for('main.manual_check') }}">
-        <button class="btn btn-primary" type="submit">Nu checken</button>
+        <button class="btn btn-primary" type="submit">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"/></svg>
+            Nu checken
+        </button>
     </form>
 </div>
 
-{% if last_check %}
-<div style="font-size:0.8rem; color:#64748b; margin-bottom:1rem;">
-    Laatste check: {{ last_check.checked_at }} ({{ last_check.source }}) — {{ last_check.routes_checked }} routes, {{ last_check.flights_found }} vluchten
+<!-- Route Summary Cards -->
+<div class="section-header">
+    <span class="section-title">Routes overzicht</span>
 </div>
-{% endif %}
+<div class="route-grid">
+    {% for rc in route_cards %}
+    <div class="card route-card">
+        <div class="route-card-header">
+            <span class="route-name">{{ rc.origin }} → {{ rc.destination }}</span>
+            {% if rc.airline %}<span class="route-airline">{{ rc.airline }}</span>{% endif %}
+        </div>
+        <div class="route-count">{{ rc.today_count }}</div>
+        <div class="route-count-label">vluchten {{ 'vandaag' if date_filter == today else date_filter }}</div>
+        <div class="route-footer">
+            {% if rc.trend == 'up' %}
+            <span class="trend-badge trend-up">↑ Stijgend</span>
+            {% elif rc.trend == 'down' %}
+            <span class="trend-badge trend-down">↓ Dalend</span>
+            {% elif rc.trend == 'stable' %}
+            <span class="trend-badge trend-stable">→ Stabiel</span>
+            {% else %}
+            <span class="trend-badge trend-new">Nieuw</span>
+            {% endif %}
+            <canvas class="sparkline" data-values="{{ rc.sparkline | tojson }}"></canvas>
+        </div>
+    </div>
+    {% endfor %}
+</div>
 
-{% if flights %}
-<table>
-    <thead>
-        <tr>
-            <th>Datum</th>
-            <th>Route</th>
-            <th>Vlucht</th>
-            <th>Vertrek</th>
-            <th>Aankomst</th>
-            <th>Status</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for f in flights %}
-        <tr>
-            <td>{{ f.date }}</td>
-            <td><span class="route-tag">{{ f.origin }} → {{ f.destination }}</span></td>
-            <td>{{ f.flight_iata or '—' }}</td>
-            <td>{{ f.dep_time }}</td>
-            <td>{{ f.arr_time }}</td>
-            <td class="status-{{ f.status_raw }}">{{ f.status }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<div class="empty">
-    <p>Geen vluchten gevonden voor {{ date_filter }}.</p>
-    <p style="margin-top:0.5rem">Druk op "Nu checken" om vluchten op te halen, of voeg eerst <a href="{{ url_for('main.manage_routes') }}">routes</a> toe.</p>
+<!-- Trend Chart -->
+<div class="card chart-card">
+    <div class="section-header" style="margin-bottom:0;">
+        <span class="section-title">Trend</span>
+        <div class="chart-controls">
+            <button class="chart-btn active" data-days="7">7d</button>
+            <button class="chart-btn" data-days="14">14d</button>
+            <button class="chart-btn" data-days="30">30d</button>
+        </div>
+    </div>
+    <div class="chart-container">
+        <canvas id="trendChart"></canvas>
+    </div>
 </div>
-{% endif %}
+
+<!-- Flight Table -->
+<div class="card flights-card">
+    <div class="flights-card-header">
+        <div class="section-header" style="margin-bottom:0;">
+            <span class="section-title">Vluchten</span>
+            <form method="GET" class="date-filter">
+                <label for="date">Datum:</label>
+                <input type="date" id="date" name="date" value="{{ date_filter }}">
+                <button class="btn btn-sm" type="submit">Filter</button>
+            </form>
+        </div>
+    </div>
+
+    {% if flight_groups %}
+        {% for route_name, flights in flight_groups.items() %}
+        <div class="flight-group-header">{{ route_name }} <span style="font-weight:400; color:var(--text-muted);">— {{ flights|length }} vlucht{{ 'en' if flights|length != 1 }}</span></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Vlucht</th>
+                    <th>Vertrek</th>
+                    <th>Aankomst</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in flights %}
+                <tr>
+                    <td><span class="flight-code">{{ f.flight_iata or '—' }}</span></td>
+                    <td><span class="flight-time">{{ f.dep_time }}</span></td>
+                    <td><span class="flight-time">{{ f.arr_time }}</span></td>
+                    <td><span class="status-badge status-{{ f.status_raw }}">{{ f.status_icon }} {{ f.status }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endfor %}
+    {% else %}
+    <div class="empty">
+        <p>Geen vluchten gevonden voor {{ date_filter }}.</p>
+        <p style="margin-top:0.5rem; font-size:0.85rem;">Druk op "Nu checken" om vluchten op te halen, of voeg eerst <a href="{{ url_for('main.manage_routes') }}">routes</a> toe.</p>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+// --- Sparklines ---
+document.querySelectorAll('.sparkline').forEach(canvas => {
+    const values = JSON.parse(canvas.dataset.values);
+    if (values.length < 2) return;
+
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width = canvas.offsetWidth * 2;
+    const h = canvas.height = canvas.offsetHeight * 2;
+    canvas.style.width = canvas.offsetWidth + 'px';
+    canvas.style.height = canvas.offsetHeight + 'px';
+
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const range = max - min || 1;
+    const step = w / (values.length - 1);
+    const pad = 4;
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+
+    values.forEach((v, i) => {
+        const x = i * step;
+        const y = h - pad - ((v - min) / range) * (h - pad * 2);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+});
+
+// --- Trend Chart ---
+const COLORS = [
+    '#2563eb', '#16a34a', '#dc2626', '#ca8a04',
+    '#7c3aed', '#0891b2', '#be185d', '#ea580c', '#4f46e5'
+];
+
+let trendChart = null;
+
+async function loadTrend(days) {
+    const resp = await fetch(`/api/trend?days=${days}`);
+    const data = await resp.json();
+
+    const labels = data.dates.map(d => {
+        const dt = new Date(d + 'T00:00:00');
+        return dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+    });
+
+    const datasets = Object.entries(data.routes).map(([name, values], i) => ({
+        label: name,
+        data: data.dates.map(d => values[d] || 0),
+        borderColor: COLORS[i % COLORS.length],
+        backgroundColor: COLORS[i % COLORS.length] + '15',
+        borderWidth: 2,
+        tension: 0.3,
+        fill: false,
+        pointRadius: days <= 14 ? 3 : 0,
+        pointHoverRadius: 5,
+    }));
+
+    if (trendChart) trendChart.destroy();
+
+    trendChart = new Chart(document.getElementById('trendChart'), {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyle: 'circle',
+                        padding: 16,
+                        font: { size: 12 },
+                    },
+                },
+                tooltip: {
+                    backgroundColor: '#1e293b',
+                    titleFont: { size: 13 },
+                    bodyFont: { size: 12 },
+                    padding: 10,
+                    cornerRadius: 8,
+                },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1,
+                        font: { size: 11 },
+                        color: '#94a3b8',
+                    },
+                    grid: { color: '#f1f5f9' },
+                },
+                x: {
+                    ticks: {
+                        font: { size: 11 },
+                        color: '#94a3b8',
+                        maxRotation: 0,
+                    },
+                    grid: { display: false },
+                },
+            },
+        },
+    });
+}
+
+// Chart control buttons
+document.querySelectorAll('.chart-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.chart-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadTrend(parseInt(btn.dataset.days));
+    });
+});
+
+loadTrend(7);
+</script>
 {% endblock %}

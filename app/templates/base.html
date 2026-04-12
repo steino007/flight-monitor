@@ -5,55 +5,361 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Flight Monitor</title>
     <style>
+        :root {
+            --bg: #f8fafc;
+            --bg-card: #ffffff;
+            --bg-hover: #f1f5f9;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --text-secondary: #64748b;
+            --text-muted: #94a3b8;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --green: #16a34a;
+            --green-bg: #f0fdf4;
+            --red: #dc2626;
+            --red-bg: #fef2f2;
+            --yellow: #ca8a04;
+            --yellow-bg: #fefce8;
+            --blue: #2563eb;
+            --blue-bg: #eff6ff;
+            --gray: #64748b;
+            --gray-bg: #f8fafc;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            --radius: 8px;
+        }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; padding: 1rem; }
-        a { color: #60a5fa; text-decoration: none; }
-        a:hover { text-decoration: underline; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
 
-        nav { display: flex; gap: 1.5rem; align-items: center; padding: 0.75rem 0; margin-bottom: 1.5rem; border-bottom: 1px solid #1e293b; }
-        nav .brand { font-weight: 700; font-size: 1.1rem; color: #f8fafc; }
-        nav .spacer { flex: 1; }
+        /* Nav */
+        .nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 0 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .nav-inner {
+            max-width: 1100px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            height: 56px;
+            gap: 2rem;
+        }
+        .nav-brand {
+            font-weight: 700;
+            font-size: 1.05rem;
+            color: var(--text);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .nav-brand svg { width: 20px; height: 20px; }
+        .nav-links { display: flex; gap: 0.25rem; }
+        .nav-link {
+            padding: 0.4rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.15s, color 0.15s;
+        }
+        .nav-link:hover { background: var(--bg-hover); color: var(--text); }
+        .nav-link.active { background: var(--blue-bg); color: var(--accent); }
+        .nav-spacer { flex: 1; }
+        .nav-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
 
-        .container { max-width: 900px; margin: 0 auto; }
+        /* Container */
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+        }
+
+        /* Section headers */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .section-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* Route cards grid */
+        .route-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 2rem;
+        }
+        .route-card {
+            padding: 1rem 1.25rem;
+            cursor: default;
+            transition: box-shadow 0.15s;
+        }
+        .route-card:hover { box-shadow: var(--shadow); }
+        .route-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+        .route-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+        .route-airline {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            background: var(--bg);
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+        }
+        .route-count {
+            font-size: 1.75rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .route-count-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .route-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 0.5rem;
+        }
+        .trend-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.2rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+        }
+        .trend-up { background: var(--green-bg); color: var(--green); }
+        .trend-down { background: var(--red-bg); color: var(--red); }
+        .trend-stable { background: var(--gray-bg); color: var(--gray); }
+        .trend-new { background: var(--blue-bg); color: var(--blue); }
+
+        /* Sparkline canvas */
+        .sparkline { width: 60px; height: 24px; }
+
+        /* Chart section */
+        .chart-card {
+            padding: 1.25rem;
+            margin-bottom: 2rem;
+        }
+        .chart-controls {
+            display: flex;
+            gap: 0.25rem;
+        }
+        .chart-btn {
+            padding: 0.3rem 0.7rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .chart-btn:hover { background: var(--bg-hover); }
+        .chart-btn.active {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        .chart-container {
+            position: relative;
+            height: 280px;
+            margin-top: 1rem;
+        }
+
+        /* Flight table */
+        .flights-card {
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }
+        .flights-card-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .flight-group-header {
+            padding: 0.6rem 1.25rem;
+            background: var(--bg);
+            font-weight: 600;
+            font-size: 0.85rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
 
         table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; color: #94a3b8; font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.5rem 0.75rem; border-bottom: 1px solid #1e293b; }
-        td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #1e293b; font-size: 0.95rem; }
-        tr:hover { background: #1e293b; }
+        th {
+            text-align: left;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            padding: 0.5rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg);
+        }
+        td {
+            padding: 0.55rem 1.25rem;
+            font-size: 0.875rem;
+            border-bottom: 1px solid var(--border);
+        }
+        tr:last-child td { border-bottom: none; }
+        tbody tr:hover { background: var(--bg-hover); }
 
-        .btn { display: inline-block; padding: 0.4rem 0.8rem; font-size: 0.85rem; border: none; border-radius: 4px; cursor: pointer; color: white; text-decoration: none; }
-        .btn-primary { background: #2563eb; }
-        .btn-primary:hover { background: #1d4ed8; }
-        .btn-danger { background: #dc2626; }
-        .btn-danger:hover { background: #b91c1c; }
-        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+        .flight-code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+        .flight-time {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
 
-        input, select { padding: 0.4rem 0.6rem; font-size: 0.9rem; border: 1px solid #334155; border-radius: 4px; background: #1e293b; color: #e2e8f0; }
-        input:focus, select:focus { outline: none; border-color: #2563eb; }
+        /* Status badges */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+        }
+        .status-landed { background: var(--green-bg); color: var(--green); }
+        .status-active { background: var(--blue-bg); color: var(--blue); }
+        .status-scheduled { background: var(--gray-bg); color: var(--gray); }
+        .status-cancelled { background: var(--red-bg); color: var(--red); }
+        .status-probably_landed { background: var(--yellow-bg); color: var(--yellow); }
+        .status-unknown { background: var(--gray-bg); color: var(--gray); }
 
-        .status-cancelled { color: #f87171; }
-        .status-landed { color: #4ade80; }
-        .status-active { color: #60a5fa; }
-        .status-scheduled { color: #94a3b8; }
-        .status-probably_landed { color: #facc15; }
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.45rem 0.9rem;
+            font-size: 0.825rem;
+            font-weight: 500;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.15s;
+            text-decoration: none;
+        }
+        .btn:hover { background: var(--bg-hover); box-shadow: var(--shadow-sm); }
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-danger {
+            color: var(--red);
+            border-color: var(--red);
+        }
+        .btn-danger:hover { background: var(--red-bg); }
+        .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
 
-        .empty { text-align: center; padding: 3rem 1rem; color: #64748b; }
+        /* Inputs */
+        input[type="text"], input[type="password"], input[type="date"], select {
+            padding: 0.45rem 0.7rem;
+            font-size: 0.875rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--text);
+            transition: border-color 0.15s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+        }
 
-        .actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+        /* Empty state */
+        .empty {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+        }
 
-        .route-tag { display: inline-block; background: #1e293b; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.85rem; font-family: monospace; }
+        /* Date filter */
+        .date-filter {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .date-filter label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="{{ url_for('main.dashboard') }}" class="nav-brand">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>
+                Flight Monitor
+            </a>
+            <div class="nav-links">
+                <a href="{{ url_for('main.dashboard') }}" class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">Dashboard</a>
+                <a href="{{ url_for('main.manage_routes') }}" class="nav-link {% if request.endpoint == 'main.manage_routes' %}active{% endif %}">Routes</a>
+            </div>
+            <span class="nav-spacer"></span>
+            <a href="{{ url_for('main.logout') }}" class="nav-link">Uitloggen</a>
+        </div>
+    </nav>
     <div class="container">
-        <nav>
-            <span class="brand">Flight Monitor</span>
-            <a href="{{ url_for('main.dashboard') }}">Vluchten</a>
-            <a href="{{ url_for('main.manage_routes') }}">Routes</a>
-            <span class="spacer"></span>
-            <a href="{{ url_for('main.logout') }}">Uitloggen</a>
-        </nav>
         {% block content %}{% endblock %}
     </div>
+    {% block scripts %}{% endblock %}
 </body>
 </html>
