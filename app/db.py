@@ -46,6 +46,13 @@ def init_db(app):
         );
         CREATE INDEX IF NOT EXISTS idx_flights_route_date ON flights(route_id, date);
         CREATE INDEX IF NOT EXISTS idx_flights_date ON flights(date DESC);
+        CREATE TABLE IF NOT EXISTS check_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            routes_checked INTEGER DEFAULT 0,
+            flights_found INTEGER DEFAULT 0,
+            source TEXT DEFAULT 'scheduler'
+        );
     """)
     conn.commit()
     conn.close()

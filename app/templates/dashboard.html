@@ -12,6 +12,12 @@
     </form>
 </div>
 
+{% if last_check %}
+<div style="font-size:0.8rem; color:#64748b; margin-bottom:1rem;">
+    Laatste check: {{ last_check.checked_at }} ({{ last_check.source }}) — {{ last_check.routes_checked }} routes, {{ last_check.flights_found }} vluchten
+</div>
+{% endif %}
+
 {% if flights %}
 <table>
     <thead>

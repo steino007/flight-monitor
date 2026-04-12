@@ -48,6 +48,10 @@ def dashboard():
 
     routes = db.execute("SELECT * FROM routes ORDER BY created_at").fetchall()
 
+    last_check = db.execute(
+        "SELECT checked_at, routes_checked, flights_found, source FROM check_log ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
     # Format flights for display
     flight_list = []
     for f in flights:
@@ -70,6 +74,7 @@ def dashboard():
         routes=routes,
         date_filter=date_filter,
         today=date.today().isoformat(),
+        last_check=last_check,
     )
 
 
@@ -111,8 +116,10 @@ def manual_check():
     routes = db.execute("SELECT * FROM routes").fetchall()
     today = date.today().isoformat()
 
+    total_flights = 0
     for route in routes:
         flights = fetch_schedules(route["origin"], route["destination"], route["airline"])
+        total_flights += len(flights)
         for f in flights:
             db.execute("""
                 INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, status)
@@ -128,6 +135,10 @@ def manual_check():
                 f.get("status", "unknown"),
             ))
 
+    db.execute(
+        "INSERT INTO check_log (routes_checked, flights_found, source) VALUES (?, ?, ?)",
+        (len(routes), total_flights, "manual"),
+    )
     db.commit()
     return redirect(url_for("main.dashboard"))
 

@@ -13,8 +13,10 @@ def check_all_routes():
     routes = conn.execute("SELECT * FROM routes").fetchall()
     today = date.today().isoformat()
 
+    total_flights = 0
     for route in routes:
         flights = fetch_schedules(route["origin"], route["destination"], route["airline"])
+        total_flights += len(flights)
         for f in flights:
             conn.execute("""
                 INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, status)
@@ -29,6 +31,11 @@ def check_all_routes():
                 f.get("arr_time", ""),
                 f.get("status", "unknown"),
             ))
+
+    conn.execute(
+        "INSERT INTO check_log (routes_checked, flights_found, source) VALUES (?, ?, ?)",
+        (len(routes), total_flights, "scheduler"),
+    )
     conn.commit()
     conn.close()
 
