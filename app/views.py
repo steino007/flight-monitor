@@ -1,5 +1,6 @@
 import json
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from flask import Blueprint, render_template, request, redirect, url_for, session
 from app.db import get_db
 from app.auth import login_required, check_password
@@ -65,7 +66,7 @@ def dashboard():
             "arr_time": _format_time(f["arr_time"]),
             "status": STATUS_DISPLAY.get(f["status"], f["status"]),
             "status_raw": f["status"],
-            "checked_at": f["checked_at"],
+            "checked_at": _utc_to_nl(f["checked_at"]),
         })
 
     return render_template(
@@ -74,7 +75,12 @@ def dashboard():
         routes=routes,
         date_filter=date_filter,
         today=date.today().isoformat(),
-        last_check=last_check,
+        last_check={
+            "checked_at": _utc_to_nl(last_check["checked_at"]),
+            "routes_checked": last_check["routes_checked"],
+            "flights_found": last_check["flights_found"],
+            "source": last_check["source"],
+        } if last_check else None,
     )
 
 
@@ -143,6 +149,9 @@ def manual_check():
     return redirect(url_for("main.dashboard"))
 
 
+NL_TZ = ZoneInfo("Europe/Amsterdam")
+
+
 def _format_time(time_str):
     """Extract HH:MM from datetime string like '2026-04-12 08:30'."""
     if not time_str:
@@ -150,3 +159,14 @@ def _format_time(time_str):
     if " " in time_str:
         return time_str.split(" ")[1][:5]
     return time_str[:5]
+
+
+def _utc_to_nl(timestamp_str):
+    """Convert UTC timestamp string to Dutch time string."""
+    if not timestamp_str:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(timestamp_str).replace(tzinfo=timezone.utc)
+        return dt.astimezone(NL_TZ).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return timestamp_str
