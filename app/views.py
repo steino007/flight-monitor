@@ -54,8 +54,18 @@ def dashboard():
     ).fetchone()
 
     # Format flights for display
+    now_utc = datetime.now(timezone.utc)
     flight_list = []
     for f in flights:
+        status = f["status"]
+        status_display = STATUS_DISPLAY.get(status, status)
+
+        # If arrival time has passed and status is still scheduled/active,
+        # show as "Waarschijnlijk geland"
+        if status in ("scheduled", "active") and _is_past(f["arr_time_utc"], now_utc):
+            status_display = "🟡 Waarschijnlijk geland"
+            status = "probably_landed"
+
         flight_list.append({
             "date": f["date"],
             "origin": f["origin"],
@@ -64,8 +74,8 @@ def dashboard():
             "flight_iata": f["flight_iata"],
             "dep_time": _format_time(f["dep_time"]),
             "arr_time": _format_time(f["arr_time"]),
-            "status": STATUS_DISPLAY.get(f["status"], f["status"]),
-            "status_raw": f["status"],
+            "status": status_display,
+            "status_raw": status,
             "checked_at": _utc_to_nl(f["checked_at"]),
         })
 
@@ -133,16 +143,18 @@ def manual_check():
                 flight_date = dep_time.split(" ")[0]
 
             db.execute("""
-                INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, arr_time_utc, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(route_id, date, flight_iata)
                 DO UPDATE SET status=excluded.status, dep_time=excluded.dep_time,
-                             arr_time=excluded.arr_time, checked_at=CURRENT_TIMESTAMP
+                             arr_time=excluded.arr_time, arr_time_utc=excluded.arr_time_utc,
+                             checked_at=CURRENT_TIMESTAMP
             """, (
                 route["id"], flight_date,
                 f.get("flight_iata", ""),
                 dep_time,
                 f.get("arr_time", ""),
+                f.get("arr_time_utc", ""),
                 f.get("status", "unknown"),
             ))
 
@@ -164,6 +176,17 @@ def _format_time(time_str):
     if " " in time_str:
         return time_str.split(" ")[1][:5]
     return time_str[:5]
+
+
+def _is_past(arr_time_utc_str, now_utc):
+    """Check if a flight's UTC arrival time is in the past."""
+    if not arr_time_utc_str:
+        return False
+    try:
+        arr_utc = datetime.fromisoformat(arr_time_utc_str).replace(tzinfo=timezone.utc)
+        return now_utc > arr_utc
+    except (ValueError, TypeError):
+        return False
 
 
 def _utc_to_nl(timestamp_str):

@@ -40,6 +40,7 @@ def init_db(app):
             flight_iata TEXT,
             dep_time TEXT,
             arr_time TEXT,
+            arr_time_utc TEXT,
             status TEXT,
             checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(route_id, date, flight_iata)
@@ -54,5 +55,10 @@ def init_db(app):
             source TEXT DEFAULT 'scheduler'
         );
     """)
+    # Migration: add arr_time_utc column if missing
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(flights)").fetchall()]
+    if "arr_time_utc" not in columns:
+        conn.execute("ALTER TABLE flights ADD COLUMN arr_time_utc TEXT")
+
     conn.commit()
     conn.close()
