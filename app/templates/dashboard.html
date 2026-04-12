@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="actions">
+    <form method="GET" style="display:flex; gap:0.5rem; align-items:center;">
+        <label for="date">Datum:</label>
+        <input type="date" id="date" name="date" value="{{ date_filter }}">
+        <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+    </form>
+    <span style="flex:1"></span>
+    <form method="POST" action="{{ url_for('main.manual_check') }}">
+        <button class="btn btn-primary" type="submit">Nu checken</button>
+    </form>
+</div>
+
+{% if flights %}
+<table>
+    <thead>
+        <tr>
+            <th>Datum</th>
+            <th>Route</th>
+            <th>Vlucht</th>
+            <th>Vertrek</th>
+            <th>Aankomst</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in flights %}
+        <tr>
+            <td>{{ f.date }}</td>
+            <td><span class="route-tag">{{ f.origin }} → {{ f.destination }}</span></td>
+            <td>{{ f.flight_iata or '—' }}</td>
+            <td>{{ f.dep_time }}</td>
+            <td>{{ f.arr_time }}</td>
+            <td class="status-{{ f.status_raw }}">{{ f.status }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">
+    <p>Geen vluchten gevonden voor {{ date_filter }}.</p>
+    <p style="margin-top:0.5rem">Druk op "Nu checken" om vluchten op te halen, of voeg eerst <a href="{{ url_for('main.manage_routes') }}">routes</a> toe.</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 style="margin-bottom:1rem;">Routes beheren</h2>
+
+<form method="POST" style="display:flex; gap:0.5rem; align-items:end; flex-wrap:wrap; margin-bottom:1.5rem;">
+    <div>
+        <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:0.2rem;">Vertrek (IATA)</label>
+        <input type="text" name="origin" placeholder="SGN" maxlength="3" style="width:80px; text-transform:uppercase;" required>
+    </div>
+    <div>
+        <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:0.2rem;">Aankomst (IATA)</label>
+        <input type="text" name="destination" placeholder="PQC" maxlength="3" style="width:80px; text-transform:uppercase;" required>
+    </div>
+    <div>
+        <label style="display:block; font-size:0.8rem; color:#94a3b8; margin-bottom:0.2rem;">Maatschappij (optioneel)</label>
+        <input type="text" name="airline" placeholder="VJ" maxlength="3" style="width:80px; text-transform:uppercase;">
+    </div>
+    <button class="btn btn-primary" type="submit">Toevoegen</button>
+</form>
+
+{% if routes %}
+<table>
+    <thead>
+        <tr>
+            <th>Route</th>
+            <th>Maatschappij</th>
+            <th>Toegevoegd</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in routes %}
+        <tr>
+            <td><span class="route-tag">{{ r.origin }} → {{ r.destination }}</span></td>
+            <td>{{ r.airline or '—' }}</td>
+            <td>{{ r.created_at[:10] }}</td>
+            <td>
+                <form method="POST" action="{{ url_for('main.delete_route', route_id=r.id) }}" style="display:inline;" onsubmit="return confirm('Route verwijderen?')">
+                    <button class="btn btn-danger btn-sm" type="submit">Verwijderen</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">
+    <p>Nog geen routes. Voeg hierboven je eerste route toe.</p>
+</div>
+{% endif %}
+{% endblock %}
