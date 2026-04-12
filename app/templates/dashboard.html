@@ -25,7 +25,7 @@
 </div>
 <div class="route-grid">
     {% for rc in route_cards %}
-    <div class="card route-card">
+    <a href="#route-{{ rc.origin }}-{{ rc.destination }}" class="card route-card" style="text-decoration:none; color:inherit;">
         <div class="route-card-header">
             <span class="route-name">{{ rc.origin }} → {{ rc.destination }}</span>
             {% if rc.airline %}<span class="route-airline">{{ rc.airline }}</span>{% endif %}
@@ -44,7 +44,7 @@
             {% endif %}
             <canvas class="sparkline" data-values="{{ rc.sparkline | tojson }}"></canvas>
         </div>
-    </div>
+    </a>
     {% endfor %}
 </div>
 
@@ -78,7 +78,8 @@
 
     {% if flight_groups %}
         {% for route_name, flights in flight_groups.items() %}
-        <div class="flight-group-header">{{ route_name }} <span style="font-weight:400; color:var(--text-muted);">— {{ flights|length }} vlucht{{ 'en' if flights|length != 1 }}</span></div>
+        {% set route_id = route_name.split(' → ') %}
+        <div class="flight-group-header" id="route-{{ route_id[0] }}-{{ route_id[1] }}">{{ route_name }} <span style="font-weight:400; color:var(--text-muted);">— {{ flights|length }} vlucht{{ 'en' if flights|length != 1 }}</span></div>
         <table>
             <thead>
                 <tr>
