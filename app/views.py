@@ -14,6 +14,7 @@ STATUS_DISPLAY = {
     "landed": "✅ Arrived",
     "cancelled": "❌ Cancelled",
     "unknown": "❓ Unknown",
+    "probably_landed": "🟡 Waarschijnlijk geland",
 }
 
 
@@ -54,17 +55,10 @@ def dashboard():
     ).fetchone()
 
     # Format flights for display
-    now_utc = datetime.now(timezone.utc)
     flight_list = []
     for f in flights:
         status = f["status"]
         status_display = STATUS_DISPLAY.get(status, status)
-
-        # If arrival time has passed and status is still scheduled/active,
-        # show as "Waarschijnlijk geland"
-        if status in ("scheduled", "active") and _is_past(f["arr_time_utc"], now_utc):
-            status_display = "🟡 Waarschijnlijk geland"
-            status = "probably_landed"
 
         flight_list.append({
             "date": f["date"],
@@ -133,6 +127,8 @@ def manual_check():
     today = date.today().isoformat()
 
     total_flights = 0
+    seen_flight_ids = set()
+
     for route in routes:
         flights = fetch_schedules(route["origin"], route["destination"], route["airline"])
         total_flights += len(flights)
@@ -141,6 +137,9 @@ def manual_check():
             dep_time = f.get("dep_time", "")
             if dep_time and " " in dep_time:
                 flight_date = dep_time.split(" ")[0]
+
+            flight_iata = f.get("flight_iata", "")
+            seen_flight_ids.add((route["id"], flight_date, flight_iata))
 
             db.execute("""
                 INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, arr_time_utc, status)
@@ -151,12 +150,26 @@ def manual_check():
                              checked_at=CURRENT_TIMESTAMP
             """, (
                 route["id"], flight_date,
-                f.get("flight_iata", ""),
+                flight_iata,
                 dep_time,
                 f.get("arr_time", ""),
                 f.get("arr_time_utc", ""),
                 f.get("status", "unknown"),
             ))
+
+    # Mark flights no longer in feed as probably landed
+    stale = db.execute("""
+        SELECT id, route_id, date, flight_iata FROM flights
+        WHERE date = ? AND status IN ('scheduled', 'active')
+    """, (today,)).fetchall()
+
+    for row in stale:
+        key = (row["route_id"], row["date"], row["flight_iata"])
+        if key not in seen_flight_ids:
+            db.execute(
+                "UPDATE flights SET status = 'probably_landed' WHERE id = ?",
+                (row["id"],),
+            )
 
     db.execute(
         "INSERT INTO check_log (routes_checked, flights_found, source) VALUES (?, ?, ?)",
