@@ -44,4 +44,5 @@ def start_scheduler(app):
     scheduler = BackgroundScheduler()
     scheduler.add_job(check_all_routes, "cron", hour=6, minute=0, id="check_morning")
     scheduler.add_job(check_all_routes, "cron", hour=14, minute=0, id="check_afternoon")
+    scheduler.add_job(check_all_routes, "cron", hour=20, minute=0, id="check_evening")
     scheduler.start()
