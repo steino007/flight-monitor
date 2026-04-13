@@ -95,9 +95,11 @@
     {% if flight_groups %}
         {% for route_name, flights in flight_groups.items() %}
         {% set route_id = route_name.split(' → ') %}
+        {% set actual = actual_counts.get(route_name, 0) %}
+        {% set missing = flights|length - actual %}
         <div class="flight-group-header" id="route-{{ route_id[0] }}-{{ route_id[1] }}">
             {{ route_name }}
-            <span class="flight-group-count">{{ flights|length }} vlucht{{ 'en' if flights|length != 1 }}</span>
+            <span class="flight-group-count">{{ actual }} gezien{% if missing > 0 %}, {{ missing }} niet gezien{% endif %}</span>
         </div>
         <table>
             <thead>

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, render_template, request, redirect, url_for, session, jsonify
 from app.db import get_db
 from app.auth import login_required, check_password
-from app.airlabs import fetch_schedules, fetch_routes
+from app.checks import run_flight_check, run_schema_check
 
 bp = Blueprint("main", __name__)
 
@@ -26,6 +26,7 @@ STATUS_ICON = {
     "probably_landed": "🟡",
 }
 
+DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 NL_TZ = ZoneInfo("Europe/Amsterdam")
 
 
@@ -51,6 +52,8 @@ def dashboard():
     db = get_db()
     today_str = date.today().isoformat()
     date_filter = request.args.get("date", today_str)
+    filter_date = date.fromisoformat(date_filter)
+    filter_day = DAY_NAMES[filter_date.weekday()]
 
     routes = db.execute("SELECT * FROM routes ORDER BY origin, destination").fetchall()
 
@@ -62,69 +65,43 @@ def dashboard():
     route_cards = []
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
-        airline_filter = r["airline"] or ""
-        if airline_filter:
-            today_count = db.execute(
-                "SELECT COUNT(*) as cnt FROM flights WHERE route_id = ? AND date = ? AND flight_iata LIKE ?",
-                (r["id"], date_filter, f"{airline_filter}%"),
-            ).fetchone()["cnt"]
-            spark_rows = db.execute("""
-                SELECT date, COUNT(*) as cnt FROM flights
-                WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ? AND flight_iata LIKE ?
-                GROUP BY date ORDER BY date
-            """, (r["id"], today_str, today_str, f"{airline_filter}%")).fetchall()
-        else:
-            today_count = db.execute(
-                "SELECT COUNT(*) as cnt FROM flights WHERE route_id = ? AND date = ? AND flight_iata != ''",
-                (r["id"], date_filter),
-            ).fetchone()["cnt"]
-            spark_rows = db.execute("""
-                SELECT date, COUNT(*) as cnt FROM flights
-                WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ? AND flight_iata != ''
-                GROUP BY date ORDER BY date
-            """, (r["id"], today_str, today_str)).fetchall()
+        airline = r["airline"] or ""
+
+        # Count actual flights (Bug 4 fix: use date_filter as anchor for sparkline)
+        today_count = _count_flights(db, r["id"], date_filter, airline)
+
+        spark_rows = _query_flights_by_date(
+            db, r["id"], date_filter, 7, airline
+        )
         sparkline = [row["cnt"] for row in spark_rows]
 
-        trend = _calc_trend(db, r["id"], today_str, airline_filter)
+        trend = _calc_trend(db, r["id"], date_filter, airline)
 
-        # Latest schema snapshot — count only flights expected today
-        snapshot = db.execute(
-            "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
-            (r["id"],),
-        ).fetchone()
-        if snapshot:
-            day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-            card_day = day_names[date.fromisoformat(date_filter).weekday()]
-            snap_data = _parse_snapshot(snapshot["flight_numbers"])
-            planned_count = sum(1 for info in snap_data.values()
-                                if not info.get("days") or card_day in info["days"])
-        else:
-            planned_count = 0
+        # Planned count filtered by weekday (Bug 1 fix)
+        planned_count = _planned_for_day(db, r["id"], filter_day)
 
         route_cards.append({
             "id": r["id"],
             "name": route_name,
             "origin": r["origin"],
             "destination": r["destination"],
-            "airline": r["airline"] or "",
+            "airline": airline,
             "today_count": today_count,
             "planned_count": planned_count,
             "sparkline": sparkline,
             "trend": trend,
         })
 
-    # Build schema lookup: latest snapshot per route + first snapshot for "originally planned"
-    schema_current = {}  # route_id -> dict of flight_iata -> {dep_time, arr_time, days}
-    schema_first = {}    # route_id -> dict of flight_iata -> {dep_time, arr_time, days}
+    # Build schema lookup
+    schema_current = {}
+    schema_first = {}
     for r in routes:
-        # Latest snapshot
         latest = db.execute(
             "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
             (r["id"],),
         ).fetchone()
         schema_current[r["id"]] = _parse_snapshot(latest["flight_numbers"]) if latest else {}
 
-        # First snapshot (baseline)
         first = db.execute(
             "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date ASC LIMIT 1",
             (r["id"],),
@@ -141,12 +118,12 @@ def dashboard():
     """, (date_filter,)).fetchall()
 
     flight_groups = {}
-    seen_flights_per_route = {}  # route_id -> set of flight_iata
+    seen_per_route = {}
+    actual_count_per_route = {}  # Bug 3 fix: track actual count separately
+
     for f in flights:
         if not f["flight_iata"]:
             continue
-
-        # Filter by airline if set on the route
         if f["airline"] and not f["flight_iata"].startswith(f["airline"]):
             continue
 
@@ -155,27 +132,23 @@ def dashboard():
 
         if route_name not in flight_groups:
             flight_groups[route_name] = []
-        if route_id not in seen_flights_per_route:
-            seen_flights_per_route[route_id] = set()
+        if route_id not in seen_per_route:
+            seen_per_route[route_id] = set()
+            actual_count_per_route[route_name] = 0
 
-        seen_flights_per_route[route_id].add(f["flight_iata"])
+        seen_per_route[route_id].add(f["flight_iata"])
+        actual_count_per_route[route_name] = actual_count_per_route.get(route_name, 0) + 1
 
         status_raw = f["status"]
         in_schema = f["flight_iata"] in schema_current.get(route_id, {})
         was_planned = f["flight_iata"] in schema_first.get(route_id, {})
 
         if in_schema:
-            schema_status = "planned"
-            schema_label = "Gepland"
-            schema_icon = "✅"
+            schema_status, schema_label, schema_icon = "planned", "Gepland", "✅"
         elif was_planned:
-            schema_status = "scrapped"
-            schema_label = "Geschrapt"
-            schema_icon = "❌"
+            schema_status, schema_label, schema_icon = "scrapped", "Geschrapt", "❌"
         else:
-            schema_status = "unknown"
-            schema_label = "—"
-            schema_icon = ""
+            schema_status, schema_label, schema_icon = "unknown", "—", ""
 
         flight_groups[route_name].append({
             "flight_iata": f["flight_iata"],
@@ -189,34 +162,27 @@ def dashboard():
             "schema_icon": schema_icon,
         })
 
-    # Add flights that are in the schema but weren't seen today
-    # Only show flights expected on this day of the week
-    day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-    filter_date = date.fromisoformat(date_filter)
-    today_day = day_names[filter_date.weekday()]
-
+    # Add missing flights (expected today but not seen)
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
         route_id = r["id"]
         current = schema_current.get(route_id, {})
-        seen = seen_flights_per_route.get(route_id, set())
+        seen = seen_per_route.get(route_id, set())
         first = schema_first.get(route_id, {})
-        missing = set(first.keys()) - seen  # flights we expected but didn't see
+        missing = set(first.keys()) - seen
 
         for flight_iata in sorted(missing):
-            # Get times from schema (prefer current, fallback to first)
             info = current.get(flight_iata) or first.get(flight_iata) or {}
 
-            # Skip flights not scheduled for this day of the week
+            # Only show if expected on this weekday
             flight_days = info.get("days", [])
-            if flight_days and today_day not in flight_days:
+            if flight_days and filter_day not in flight_days:
                 continue
 
             if route_name not in flight_groups:
                 flight_groups[route_name] = []
 
             in_current = flight_iata in current
-
             flight_groups[route_name].append({
                 "flight_iata": flight_iata,
                 "dep_time": info.get("dep_time", "—"),
@@ -233,6 +199,7 @@ def dashboard():
         "dashboard.html",
         route_cards=route_cards,
         flight_groups=flight_groups,
+        actual_counts=actual_count_per_route,
         date_filter=date_filter,
         today=today_str,
         last_check={
@@ -261,23 +228,50 @@ def trend_api():
     result = {}
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
+        airline = r["airline"] or ""
 
-        # Planned counts from route_snapshots
+        # Get snapshot data (raw JSON) to compute per-day planned count (Bug 1 fix)
         snapshots = db.execute("""
-            SELECT date, planned_count FROM route_snapshots
+            SELECT date, flight_numbers FROM route_snapshots
             WHERE route_id = ? AND date >= date(?, ?) AND date <= ?
             ORDER BY date
         """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
-        planned_map = {row["date"]: row["planned_count"] for row in snapshots}
 
-        # Actual flights per day (filtered by airline if set)
-        airline_filter = r["airline"] or ""
-        if airline_filter:
+        # Build planned_map: for each date, count flights expected on that weekday
+        planned_map = {}
+        last_snapshot_data = None
+        for snap in snapshots:
+            snap_data = _parse_snapshot(snap["flight_numbers"])
+            last_snapshot_data = snap_data
+            snap_day = DAY_NAMES[date.fromisoformat(snap["date"]).weekday()]
+            planned_map[snap["date"]] = sum(
+                1 for info in snap_data.values()
+                if not info.get("days") or snap_day in info["days"]
+            )
+
+        # Fill dates without snapshots using nearest earlier snapshot
+        for d in all_dates:
+            if d not in planned_map and last_snapshot_data:
+                d_day = DAY_NAMES[date.fromisoformat(d).weekday()]
+                # Find most recent snapshot before this date
+                nearest = None
+                for snap in snapshots:
+                    if snap["date"] <= d:
+                        nearest = snap
+                if nearest:
+                    snap_data = _parse_snapshot(nearest["flight_numbers"])
+                    planned_map[d] = sum(
+                        1 for info in snap_data.values()
+                        if not info.get("days") or d_day in info["days"]
+                    )
+
+        # Actual flights per day
+        if airline:
             actuals = db.execute("""
                 SELECT date, status, COUNT(*) as cnt FROM flights
                 WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata LIKE ?
                 GROUP BY date, status ORDER BY date
-            """, (r["id"], today_str, f"-{days-1} days", today_str, f"{airline_filter}%")).fetchall()
+            """, (r["id"], today_str, f"-{days-1} days", today_str, f"{airline}%")).fetchall()
         else:
             actuals = db.execute("""
                 SELECT date, status, COUNT(*) as cnt FROM flights
@@ -285,7 +279,6 @@ def trend_api():
                 GROUP BY date, status ORDER BY date
             """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
 
-        # Build per-day counts
         day_data = {}
         for row in actuals:
             d = row["date"]
@@ -301,7 +294,6 @@ def trend_api():
             planned = planned_map.get(d, 0)
             flown = day_data.get(d, {}).get("flown", 0)
             cancelled = day_data.get(d, {}).get("cancelled", 0)
-            # Scrapped = planned minus what we actually saw (flown + cancelled)
             actual_total = flown + cancelled
             scrapped = max(0, planned - actual_total) if planned > 0 else 0
 
@@ -320,34 +312,16 @@ def trend_api():
 @bp.route("/check-schema", methods=["POST"])
 @login_required
 def manual_schema_check():
-    """Trigger a manual schema check for all routes."""
     db = get_db()
-    routes = db.execute("SELECT * FROM routes").fetchall()
-    today = date.today().isoformat()
+    run_schema_check(db)
+    return redirect(url_for("main.dashboard"))
 
-    for route in routes:
-        planned = fetch_routes(route["origin"], route["destination"], route["airline"])
-        flight_data = [{
-            "flight_iata": f.get("flight_iata", ""),
-            "dep_time": f.get("dep_time", ""),
-            "arr_time": f.get("arr_time", ""),
-            "days": f.get("days", []),
-        } for f in planned]
 
-        db.execute("""
-            INSERT INTO route_snapshots (route_id, date, planned_count, flight_numbers)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(route_id, date)
-            DO UPDATE SET planned_count=excluded.planned_count,
-                         flight_numbers=excluded.flight_numbers,
-                         checked_at=CURRENT_TIMESTAMP
-        """, (
-            route["id"], today,
-            len(planned),
-            json.dumps(flight_data),
-        ))
-
-    db.commit()
+@bp.route("/check-all", methods=["POST"])
+@login_required
+def manual_check():
+    db = get_db()
+    run_flight_check(db)
     return redirect(url_for("main.dashboard"))
 
 
@@ -391,66 +365,6 @@ def delete_route(route_id):
     return redirect(url_for("main.manage_routes"))
 
 
-@bp.route("/check-all", methods=["POST"])
-@login_required
-def manual_check():
-    db = get_db()
-    routes = db.execute("SELECT * FROM routes").fetchall()
-    today = date.today().isoformat()
-
-    total_flights = 0
-    seen_flight_ids = set()
-
-    for route in routes:
-        flights = fetch_schedules(route["origin"], route["destination"], route["airline"])
-        total_flights += len(flights)
-        for f in flights:
-            flight_date = today
-            dep_time = f.get("dep_time", "")
-            if dep_time and " " in dep_time:
-                flight_date = dep_time.split(" ")[0]
-
-            flight_iata = f.get("flight_iata", "")
-            seen_flight_ids.add((route["id"], flight_date, flight_iata))
-
-            db.execute("""
-                INSERT INTO flights (route_id, date, flight_iata, dep_time, arr_time, arr_time_utc, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(route_id, date, flight_iata)
-                DO UPDATE SET status=excluded.status, dep_time=excluded.dep_time,
-                             arr_time=excluded.arr_time, arr_time_utc=excluded.arr_time_utc,
-                             checked_at=CURRENT_TIMESTAMP
-            """, (
-                route["id"], flight_date,
-                flight_iata,
-                dep_time,
-                f.get("arr_time", ""),
-                f.get("arr_time_utc", ""),
-                f.get("status", "unknown"),
-            ))
-
-    # Mark flights no longer in feed as probably landed
-    stale = db.execute("""
-        SELECT id, route_id, date, flight_iata FROM flights
-        WHERE date = ? AND status IN ('scheduled', 'active')
-    """, (today,)).fetchall()
-
-    for row in stale:
-        key = (row["route_id"], row["date"], row["flight_iata"])
-        if key not in seen_flight_ids:
-            db.execute(
-                "UPDATE flights SET status = 'probably_landed' WHERE id = ?",
-                (row["id"],),
-            )
-
-    db.execute(
-        "INSERT INTO check_log (routes_checked, flights_found, source) VALUES (?, ?, ?)",
-        (len(routes), total_flights, "manual"),
-    )
-    db.commit()
-    return redirect(url_for("main.dashboard"))
-
-
 # --- Helpers ---
 
 def _parse_snapshot(flight_numbers_json):
@@ -459,10 +373,8 @@ def _parse_snapshot(flight_numbers_json):
     result = {}
     for item in data:
         if isinstance(item, str):
-            # Old format: just flight_iata strings
             result[item] = {"dep_time": "—", "arr_time": "—", "days": []}
         elif isinstance(item, dict):
-            # New format: {flight_iata, dep_time, arr_time, days}
             iata = item.get("flight_iata", "")
             if iata:
                 result[iata] = {
@@ -473,20 +385,50 @@ def _parse_snapshot(flight_numbers_json):
     return result
 
 
-def _calc_trend(db, route_id, today_str, airline=""):
-    """Compare recent 3 days avg vs previous 3 days avg. Returns 'up', 'down', 'stable', or 'new'."""
+def _planned_for_day(db, route_id, day_name):
+    """Count planned flights for a specific weekday from the latest snapshot."""
+    snapshot = db.execute(
+        "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
+        (route_id,),
+    ).fetchone()
+    if not snapshot:
+        return 0
+    snap_data = _parse_snapshot(snapshot["flight_numbers"])
+    return sum(1 for info in snap_data.values()
+               if not info.get("days") or day_name in info["days"])
+
+
+def _count_flights(db, route_id, date_str, airline=""):
+    """Count actual flights for a route on a specific date."""
     if airline:
-        rows = db.execute("""
+        return db.execute(
+            "SELECT COUNT(*) as cnt FROM flights WHERE route_id = ? AND date = ? AND flight_iata LIKE ?",
+            (route_id, date_str, f"{airline}%"),
+        ).fetchone()["cnt"]
+    return db.execute(
+        "SELECT COUNT(*) as cnt FROM flights WHERE route_id = ? AND date = ? AND flight_iata != ''",
+        (route_id, date_str),
+    ).fetchone()["cnt"]
+
+
+def _query_flights_by_date(db, route_id, anchor_date, days, airline=""):
+    """Get flight counts per date for sparkline/trend, anchored to a specific date."""
+    if airline:
+        return db.execute("""
             SELECT date, COUNT(*) as cnt FROM flights
-            WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ? AND flight_iata LIKE ?
+            WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata LIKE ?
             GROUP BY date ORDER BY date
-        """, (route_id, today_str, today_str, f"{airline}%")).fetchall()
-    else:
-        rows = db.execute("""
-            SELECT date, COUNT(*) as cnt FROM flights
-            WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ? AND flight_iata != ''
-            GROUP BY date ORDER BY date
-        """, (route_id, today_str, today_str)).fetchall()
+        """, (route_id, anchor_date, f"-{days-1} days", anchor_date, f"{airline}%")).fetchall()
+    return db.execute("""
+        SELECT date, COUNT(*) as cnt FROM flights
+        WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata != ''
+        GROUP BY date ORDER BY date
+    """, (route_id, anchor_date, f"-{days-1} days", anchor_date)).fetchall()
+
+
+def _calc_trend(db, route_id, anchor_date, airline=""):
+    """Compare recent 3 days avg vs previous 3 days avg. Anchored to anchor_date."""
+    rows = _query_flights_by_date(db, route_id, anchor_date, 7, airline)
 
     if len(rows) < 2:
         return "new"
