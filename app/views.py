@@ -97,22 +97,22 @@ def dashboard():
         })
 
     # Build schema lookup: latest snapshot per route + first snapshot for "originally planned"
-    schema_current = {}  # route_id -> set of flight_iata
-    schema_first = {}    # route_id -> set of flight_iata
+    schema_current = {}  # route_id -> dict of flight_iata -> {dep_time, arr_time, days}
+    schema_first = {}    # route_id -> dict of flight_iata -> {dep_time, arr_time, days}
     for r in routes:
         # Latest snapshot
         latest = db.execute(
             "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
             (r["id"],),
         ).fetchone()
-        schema_current[r["id"]] = set(json.loads(latest["flight_numbers"])) if latest else set()
+        schema_current[r["id"]] = _parse_snapshot(latest["flight_numbers"]) if latest else {}
 
         # First snapshot (baseline)
         first = db.execute(
             "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date ASC LIMIT 1",
             (r["id"],),
         ).fetchone()
-        schema_first[r["id"]] = set(json.loads(first["flight_numbers"])) if first else set()
+        schema_first[r["id"]] = _parse_snapshot(first["flight_numbers"]) if first else {}
 
     # Flights grouped by route
     flights = db.execute("""
@@ -140,8 +140,8 @@ def dashboard():
         seen_flights_per_route[route_id].add(f["flight_iata"])
 
         status_raw = f["status"]
-        in_schema = f["flight_iata"] in schema_current.get(route_id, set())
-        was_planned = f["flight_iata"] in schema_first.get(route_id, set())
+        in_schema = f["flight_iata"] in schema_current.get(route_id, {})
+        was_planned = f["flight_iata"] in schema_first.get(route_id, {})
 
         if in_schema:
             schema_status = "planned"
@@ -172,20 +172,23 @@ def dashboard():
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
         route_id = r["id"]
-        current = schema_current.get(route_id, set())
+        current = schema_current.get(route_id, {})
         seen = seen_flights_per_route.get(route_id, set())
-        first = schema_first.get(route_id, set())
-        missing = first - seen  # flights we expected but didn't see
+        first = schema_first.get(route_id, {})
+        missing = set(first.keys()) - seen  # flights we expected but didn't see
 
         for flight_iata in sorted(missing):
             if route_name not in flight_groups:
                 flight_groups[route_name] = []
 
             in_current = flight_iata in current
+            # Get times from schema (prefer current, fallback to first)
+            info = current.get(flight_iata) or first.get(flight_iata) or {}
+
             flight_groups[route_name].append({
                 "flight_iata": flight_iata,
-                "dep_time": "—",
-                "arr_time": "—",
+                "dep_time": info.get("dep_time", "—"),
+                "arr_time": info.get("arr_time", "—"),
                 "status": "Niet gezien" if in_current else "Geschrapt",
                 "status_icon": "⚫" if in_current else "❌",
                 "status_raw": "missing" if in_current else "scrapped_missing",
@@ -284,7 +287,12 @@ def manual_schema_check():
 
     for route in routes:
         planned = fetch_routes(route["origin"], route["destination"])
-        flight_numbers = [f.get("flight_iata", "") for f in planned]
+        flight_data = [{
+            "flight_iata": f.get("flight_iata", ""),
+            "dep_time": f.get("dep_time", ""),
+            "arr_time": f.get("arr_time", ""),
+            "days": f.get("days", []),
+        } for f in planned]
 
         db.execute("""
             INSERT INTO route_snapshots (route_id, date, planned_count, flight_numbers)
@@ -296,7 +304,7 @@ def manual_schema_check():
         """, (
             route["id"], today,
             len(planned),
-            json.dumps(flight_numbers),
+            json.dumps(flight_data),
         ))
 
     db.commit()
@@ -394,6 +402,26 @@ def manual_check():
 
 
 # --- Helpers ---
+
+def _parse_snapshot(flight_numbers_json):
+    """Parse snapshot data. Handles both old format (list of strings) and new format (list of dicts)."""
+    data = json.loads(flight_numbers_json)
+    result = {}
+    for item in data:
+        if isinstance(item, str):
+            # Old format: just flight_iata strings
+            result[item] = {"dep_time": "—", "arr_time": "—", "days": []}
+        elif isinstance(item, dict):
+            # New format: {flight_iata, dep_time, arr_time, days}
+            iata = item.get("flight_iata", "")
+            if iata:
+                result[iata] = {
+                    "dep_time": item.get("dep_time", "—"),
+                    "arr_time": item.get("arr_time", "—"),
+                    "days": item.get("days", []),
+                }
+    return result
+
 
 def _calc_trend(db, route_id, today_str):
     """Compare recent 3 days avg vs previous 3 days avg. Returns 'up', 'down', 'stable', or 'new'."""

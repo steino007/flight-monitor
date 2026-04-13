@@ -76,7 +76,12 @@ def check_all_schemas():
 
     for route in routes:
         planned = fetch_routes(route["origin"], route["destination"])
-        flight_numbers = [f.get("flight_iata", "") for f in planned]
+        flight_data = [{
+            "flight_iata": f.get("flight_iata", ""),
+            "dep_time": f.get("dep_time", ""),
+            "arr_time": f.get("arr_time", ""),
+            "days": f.get("days", []),
+        } for f in planned]
 
         conn.execute("""
             INSERT INTO route_snapshots (route_id, date, planned_count, flight_numbers)
@@ -88,7 +93,7 @@ def check_all_schemas():
         """, (
             route["id"], today,
             len(planned),
-            json.dumps(flight_numbers),
+            json.dumps(flight_data),
         ))
 
     conn.commit()
