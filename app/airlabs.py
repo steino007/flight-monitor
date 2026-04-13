@@ -26,7 +26,7 @@ def fetch_schedules(origin, destination, airline=None):
         return []
 
 
-def fetch_routes(origin, destination):
+def fetch_routes(origin, destination, airline=None):
     """Fetch planned route schedule from AirLabs /routes endpoint.
     Returns list of planned flights with days, times, flight numbers.
     """
@@ -35,6 +35,8 @@ def fetch_routes(origin, destination):
         "dep_iata": origin,
         "arr_iata": destination,
     }
+    if airline:
+        params["airline_iata"] = airline
     try:
         resp = requests.get(f"{BASE_URL}/routes", params=params, timeout=15)
         resp.raise_for_status()

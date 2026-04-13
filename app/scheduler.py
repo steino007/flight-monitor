@@ -75,7 +75,7 @@ def check_all_schemas():
     today = date.today().isoformat()
 
     for route in routes:
-        planned = fetch_routes(route["origin"], route["destination"])
+        planned = fetch_routes(route["origin"], route["destination"], route["airline"])
         flight_data = [{
             "flight_iata": f.get("flight_iata", ""),
             "dep_time": f.get("dep_time", ""),
