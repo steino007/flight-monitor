@@ -63,13 +63,13 @@ def dashboard():
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
         today_count = db.execute(
-            "SELECT COUNT(*) as cnt FROM flights WHERE route_id = ? AND date = ?",
+            "SELECT COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights WHERE route_id = ? AND date = ?",
             (r["id"], date_filter),
         ).fetchone()["cnt"]
 
         # 7-day sparkline
         spark_rows = db.execute("""
-            SELECT date, COUNT(*) as cnt FROM flights
+            SELECT date, COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights
             WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ?
             GROUP BY date ORDER BY date
         """, (r["id"], today_str, today_str)).fetchall()
@@ -150,7 +150,7 @@ def trend_api():
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
         rows = db.execute("""
-            SELECT date, COUNT(*) as cnt FROM flights
+            SELECT date, COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights
             WHERE route_id = ? AND date >= date(?, ?) AND date <= ?
             GROUP BY date ORDER BY date
         """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
@@ -264,7 +264,7 @@ def manual_check():
 def _calc_trend(db, route_id, today_str):
     """Compare recent 3 days avg vs previous 3 days avg. Returns 'up', 'down', 'stable', or 'new'."""
     rows = db.execute("""
-        SELECT date, COUNT(*) as cnt FROM flights
+        SELECT date, COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights
         WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ?
         GROUP BY date ORDER BY date
     """, (route_id, today_str, today_str)).fetchall()
