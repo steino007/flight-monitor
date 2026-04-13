@@ -87,12 +87,19 @@ def dashboard():
 
         trend = _calc_trend(db, r["id"], today_str, airline_filter)
 
-        # Latest schema snapshot
+        # Latest schema snapshot — count only flights expected today
         snapshot = db.execute(
-            "SELECT planned_count FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
+            "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
             (r["id"],),
         ).fetchone()
-        planned_count = snapshot["planned_count"] if snapshot else 0
+        if snapshot:
+            day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+            card_day = day_names[date.fromisoformat(date_filter).weekday()]
+            snap_data = _parse_snapshot(snapshot["flight_numbers"])
+            planned_count = sum(1 for info in snap_data.values()
+                                if not info.get("days") or card_day in info["days"])
+        else:
+            planned_count = 0
 
         route_cards.append({
             "id": r["id"],
@@ -183,6 +190,11 @@ def dashboard():
         })
 
     # Add flights that are in the schema but weren't seen today
+    # Only show flights expected on this day of the week
+    day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    filter_date = date.fromisoformat(date_filter)
+    today_day = day_names[filter_date.weekday()]
+
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
         route_id = r["id"]
@@ -192,12 +204,18 @@ def dashboard():
         missing = set(first.keys()) - seen  # flights we expected but didn't see
 
         for flight_iata in sorted(missing):
+            # Get times from schema (prefer current, fallback to first)
+            info = current.get(flight_iata) or first.get(flight_iata) or {}
+
+            # Skip flights not scheduled for this day of the week
+            flight_days = info.get("days", [])
+            if flight_days and today_day not in flight_days:
+                continue
+
             if route_name not in flight_groups:
                 flight_groups[route_name] = []
 
             in_current = flight_iata in current
-            # Get times from schema (prefer current, fallback to first)
-            info = current.get(flight_iata) or first.get(flight_iata) or {}
 
             flight_groups[route_name].append({
                 "flight_iata": flight_iata,
