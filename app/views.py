@@ -332,6 +332,16 @@ def manage_routes():
     return render_template("routes.html", routes=routes)
 
 
+@bp.route("/route/<int:route_id>/edit", methods=["POST"])
+@login_required
+def edit_route(route_id):
+    db = get_db()
+    airline = request.form.get("airline", "").strip().upper() or None
+    db.execute("UPDATE routes SET airline = ? WHERE id = ?", (airline, route_id))
+    db.commit()
+    return redirect(url_for("main.manage_routes"))
+
+
 @bp.route("/route/<int:route_id>/delete", methods=["POST"])
 @login_required
 def delete_route(route_id):

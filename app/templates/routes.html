@@ -1,24 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
-    <h1 style="font-size:1.35rem; font-weight:700;">Routes beheren</h1>
+<div class="page-header">
+    <h1 class="page-title">Routes beheren</h1>
 </div>
 
 <!-- Add route form -->
 <div class="card" style="padding:1.25rem; margin-bottom:1.5rem;">
     <form method="POST" style="display:flex; gap:0.75rem; align-items:end; flex-wrap:wrap;">
         <div>
-            <label style="display:block; font-size:0.75rem; font-weight:500; color:var(--text-muted); margin-bottom:0.3rem; text-transform:uppercase; letter-spacing:0.05em;">Vertrek (IATA)</label>
+            <label style="display:block; font-size:0.7rem; font-weight:600; color:var(--text-muted); margin-bottom:0.3rem; text-transform:uppercase; letter-spacing:0.05em;">Vertrek (IATA)</label>
             <input type="text" name="origin" placeholder="SGN" maxlength="3" style="width:90px; text-transform:uppercase;" required>
         </div>
         <div>
-            <label style="display:block; font-size:0.75rem; font-weight:500; color:var(--text-muted); margin-bottom:0.3rem; text-transform:uppercase; letter-spacing:0.05em;">Aankomst (IATA)</label>
+            <label style="display:block; font-size:0.7rem; font-weight:600; color:var(--text-muted); margin-bottom:0.3rem; text-transform:uppercase; letter-spacing:0.05em;">Aankomst (IATA)</label>
             <input type="text" name="destination" placeholder="PQC" maxlength="3" style="width:90px; text-transform:uppercase;" required>
         </div>
         <div>
-            <label style="display:block; font-size:0.75rem; font-weight:500; color:var(--text-muted); margin-bottom:0.3rem; text-transform:uppercase; letter-spacing:0.05em;">Maatschappij</label>
-            <input type="text" name="airline" placeholder="VJ" maxlength="3" style="width:90px; text-transform:uppercase;">
+            <label style="display:block; font-size:0.7rem; font-weight:600; color:var(--text-muted); margin-bottom:0.3rem; text-transform:uppercase; letter-spacing:0.05em;">Maatschappij</label>
+            <input type="text" name="airline" placeholder="TK" maxlength="3" style="width:90px; text-transform:uppercase;">
         </div>
         <button class="btn btn-primary" type="submit">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -42,9 +42,14 @@
         <tbody>
             {% for r in routes %}
             <tr>
-                <td><span class="route-name" style="font-size:0.875rem;">{{ r.origin }} → {{ r.destination }}</span></td>
-                <td>{% if r.airline %}<span class="route-airline">{{ r.airline }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
-                <td style="color:var(--text-secondary); font-size:0.85rem;">{{ r.created_at[:10] }}</td>
+                <td><span class="route-name" style="font-size:0.85rem;">{{ r.origin }} → {{ r.destination }}</span></td>
+                <td>
+                    <form method="POST" action="{{ url_for('main.edit_route', route_id=r.id) }}" style="display:flex; gap:0.35rem; align-items:center;">
+                        <input type="text" name="airline" value="{{ r.airline or '' }}" placeholder="—" maxlength="3" style="width:65px; text-transform:uppercase; font-size:0.82rem; padding:0.3rem 0.5rem;">
+                        <button class="btn btn-sm" type="submit">Opslaan</button>
+                    </form>
+                </td>
+                <td style="color:var(--text-secondary); font-size:0.82rem;">{{ r.created_at[:10] }}</td>
                 <td>
                     <form method="POST" action="{{ url_for('main.delete_route', route_id=r.id) }}" style="display:inline;" onsubmit="return confirm('Route {{ r.origin }} → {{ r.destination }} verwijderen?')">
                         <button class="btn btn-danger btn-sm" type="submit">Verwijderen</button>
