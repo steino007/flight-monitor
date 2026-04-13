@@ -63,14 +63,14 @@ def dashboard():
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
         today_count = db.execute(
-            "SELECT COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights WHERE route_id = ? AND date = ?",
+            "SELECT COUNT(*) as cnt FROM flights WHERE route_id = ? AND date = ? AND flight_iata != ''",
             (r["id"], date_filter),
         ).fetchone()["cnt"]
 
         # 7-day sparkline
         spark_rows = db.execute("""
-            SELECT date, COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights
-            WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ?
+            SELECT date, COUNT(*) as cnt FROM flights
+            WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ? AND flight_iata != ''
             GROUP BY date ORDER BY date
         """, (r["id"], today_str, today_str)).fetchall()
         sparkline = [row["cnt"] for row in spark_rows]
@@ -98,17 +98,11 @@ def dashboard():
     """, (date_filter,)).fetchall()
 
     flight_groups = {}
-    seen = set()
     for f in flights:
-        route_name = f"{f['origin']} → {f['destination']}"
-
-        # Deduplicate flights without a code that have the same times
         if not f["flight_iata"]:
-            key = (route_name, f["dep_time"], f["arr_time"])
-            if key in seen:
-                continue
-            seen.add(key)
+            continue
 
+        route_name = f"{f['origin']} → {f['destination']}"
         if route_name not in flight_groups:
             flight_groups[route_name] = []
 
@@ -150,8 +144,8 @@ def trend_api():
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
         rows = db.execute("""
-            SELECT date, COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights
-            WHERE route_id = ? AND date >= date(?, ?) AND date <= ?
+            SELECT date, COUNT(*) as cnt FROM flights
+            WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata != ''
             GROUP BY date ORDER BY date
         """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
         result[route_name] = {row["date"]: row["cnt"] for row in rows}
@@ -264,8 +258,8 @@ def manual_check():
 def _calc_trend(db, route_id, today_str):
     """Compare recent 3 days avg vs previous 3 days avg. Returns 'up', 'down', 'stable', or 'new'."""
     rows = db.execute("""
-        SELECT date, COUNT(DISTINCT COALESCE(NULLIF(flight_iata,''), dep_time)) as cnt FROM flights
-        WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ?
+        SELECT date, COUNT(*) as cnt FROM flights
+        WHERE route_id = ? AND date >= date(?, '-6 days') AND date <= ? AND flight_iata != ''
         GROUP BY date ORDER BY date
     """, (route_id, today_str, today_str)).fetchall()
 
