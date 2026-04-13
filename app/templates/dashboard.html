@@ -105,15 +105,17 @@
                     <th>Vlucht</th>
                     <th>Vertrek</th>
                     <th>Aankomst</th>
+                    <th>Schema</th>
                     <th>Status</th>
                 </tr>
             </thead>
             <tbody>
                 {% for f in flights %}
-                <tr>
+                <tr{% if f.status_raw in ('scrapped_missing', 'missing') %} style="opacity:0.6;"{% endif %}>
                     <td><span class="flight-code">{{ f.flight_iata or '—' }}</span></td>
                     <td><span class="flight-time">{{ f.dep_time }}</span></td>
                     <td><span class="flight-time">{{ f.arr_time }}</span></td>
+                    <td><span class="schema-badge schema-{{ f.schema_status }}">{{ f.schema_icon }} {{ f.schema_label }}</span></td>
                     <td><span class="status-badge status-{{ f.status_raw }}">{{ f.status_icon }} {{ f.status }}</span></td>
                 </tr>
                 {% endfor %}

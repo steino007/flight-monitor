@@ -338,6 +338,23 @@
         .status-probably_landed { background: var(--yellow-bg); color: var(--yellow); }
         .status-unknown { background: var(--gray-bg); color: var(--gray); }
 
+        /* Schema badges */
+        .schema-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .schema-planned { color: var(--green); }
+        .schema-scrapped { color: var(--red); }
+        .schema-unknown { color: var(--text-muted); }
+
+        /* Extra status styles */
+        .status-missing { background: var(--gray-bg); color: var(--gray); }
+        .status-scrapped_missing { background: var(--red-bg); color: var(--red); }
+
         /* Buttons */
         .btn {
             display: inline-flex;

@@ -96,6 +96,24 @@ def dashboard():
             "trend": trend,
         })
 
+    # Build schema lookup: latest snapshot per route + first snapshot for "originally planned"
+    schema_current = {}  # route_id -> set of flight_iata
+    schema_first = {}    # route_id -> set of flight_iata
+    for r in routes:
+        # Latest snapshot
+        latest = db.execute(
+            "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
+            (r["id"],),
+        ).fetchone()
+        schema_current[r["id"]] = set(json.loads(latest["flight_numbers"])) if latest else set()
+
+        # First snapshot (baseline)
+        first = db.execute(
+            "SELECT flight_numbers FROM route_snapshots WHERE route_id = ? ORDER BY date ASC LIMIT 1",
+            (r["id"],),
+        ).fetchone()
+        schema_first[r["id"]] = set(json.loads(first["flight_numbers"])) if first else set()
+
     # Flights grouped by route
     flights = db.execute("""
         SELECT f.*, r.origin, r.destination, r.airline
@@ -106,15 +124,38 @@ def dashboard():
     """, (date_filter,)).fetchall()
 
     flight_groups = {}
+    seen_flights_per_route = {}  # route_id -> set of flight_iata
     for f in flights:
         if not f["flight_iata"]:
             continue
 
         route_name = f"{f['origin']} → {f['destination']}"
+        route_id = f["route_id"]
+
         if route_name not in flight_groups:
             flight_groups[route_name] = []
+        if route_id not in seen_flights_per_route:
+            seen_flights_per_route[route_id] = set()
+
+        seen_flights_per_route[route_id].add(f["flight_iata"])
 
         status_raw = f["status"]
+        in_schema = f["flight_iata"] in schema_current.get(route_id, set())
+        was_planned = f["flight_iata"] in schema_first.get(route_id, set())
+
+        if in_schema:
+            schema_status = "planned"
+            schema_label = "Gepland"
+            schema_icon = "✅"
+        elif was_planned:
+            schema_status = "scrapped"
+            schema_label = "Geschrapt"
+            schema_icon = "❌"
+        else:
+            schema_status = "unknown"
+            schema_label = "—"
+            schema_icon = ""
+
         flight_groups[route_name].append({
             "flight_iata": f["flight_iata"],
             "dep_time": _format_time(f["dep_time"]),
@@ -122,7 +163,36 @@ def dashboard():
             "status": STATUS_DISPLAY.get(status_raw, status_raw),
             "status_icon": STATUS_ICON.get(status_raw, ""),
             "status_raw": status_raw,
+            "schema_status": schema_status,
+            "schema_label": schema_label,
+            "schema_icon": schema_icon,
         })
+
+    # Add flights that are in the schema but weren't seen today
+    for r in routes:
+        route_name = f"{r['origin']} → {r['destination']}"
+        route_id = r["id"]
+        current = schema_current.get(route_id, set())
+        seen = seen_flights_per_route.get(route_id, set())
+        first = schema_first.get(route_id, set())
+        missing = first - seen  # flights we expected but didn't see
+
+        for flight_iata in sorted(missing):
+            if route_name not in flight_groups:
+                flight_groups[route_name] = []
+
+            in_current = flight_iata in current
+            flight_groups[route_name].append({
+                "flight_iata": flight_iata,
+                "dep_time": "—",
+                "arr_time": "—",
+                "status": "Niet gezien" if in_current else "Geschrapt",
+                "status_icon": "⚫" if in_current else "❌",
+                "status_raw": "missing" if in_current else "scrapped_missing",
+                "schema_status": "planned" if in_current else "scrapped",
+                "schema_label": "Gepland" if in_current else "Geschrapt",
+                "schema_icon": "✅" if in_current else "❌",
+            })
 
     return render_template(
         "dashboard.html",
