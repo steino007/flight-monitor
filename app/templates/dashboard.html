@@ -2,26 +2,26 @@
 {% block content %}
 
 <!-- Header -->
-<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
+<div class="page-header">
     <div>
-        <h1 style="font-size:1.35rem; font-weight:700;">Dashboard</h1>
+        <h1 class="page-title">Dashboard</h1>
         {% if last_check %}
-        <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">
+        <p class="page-subtitle">
             Laatste check: {{ last_check.checked_at }} ({{ last_check.source }}) — {{ last_check.routes_checked }} routes, {{ last_check.flights_found }} vluchten
         </p>
         {% endif %}
     </div>
-    <div style="display:flex; gap:0.5rem;">
+    <div class="page-actions">
         <form method="POST" action="{{ url_for('main.manual_schema_check') }}">
             <button class="btn" type="submit">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-                Schema check
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                Schema
             </button>
         </form>
         <form method="POST" action="{{ url_for('main.manual_check') }}">
             <button class="btn btn-primary" type="submit">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"/></svg>
-                Nu checken
+                Vluchten checken
             </button>
         </form>
     </div>
@@ -29,7 +29,7 @@
 
 <!-- Route Summary Cards -->
 <div class="section-header">
-    <span class="section-title">Routes overzicht</span>
+    <span class="section-title">Routes</span>
 </div>
 <div class="route-grid">
     {% for rc in route_cards %}
@@ -38,13 +38,20 @@
             <span class="route-name">{{ rc.origin }} → {{ rc.destination }}</span>
             {% if rc.airline %}<span class="route-airline">{{ rc.airline }}</span>{% endif %}
         </div>
-        <div style="display:flex; align-items:baseline; gap:0.5rem;">
+        <div style="display:flex; align-items:baseline; gap:0.4rem;">
             <div class="route-count">{{ rc.today_count }}</div>
             {% if rc.planned_count > 0 %}
-            <div style="font-size:0.85rem; color:var(--text-muted);">/ {{ rc.planned_count }} gepland</div>
+            <span class="route-planned">/ {{ rc.planned_count }}</span>
             {% endif %}
         </div>
         <div class="route-count-label">vluchten {{ 'vandaag' if date_filter == today else date_filter }}</div>
+        {% if rc.planned_count > 0 %}
+        <div class="route-progress">
+            {% set pct = (rc.today_count / rc.planned_count * 100) | int if rc.planned_count > 0 else 0 %}
+            {% set bar_color = 'var(--green)' if pct >= 70 else ('var(--yellow)' if pct >= 40 else 'var(--red)') %}
+            <div class="route-progress-bar" style="width:{{ [pct, 100] | min }}%; background:{{ bar_color }};"></div>
+        </div>
+        {% endif %}
         <div class="route-footer">
             {% if rc.trend == 'up' %}
             <span class="trend-badge trend-up">↑ Stijgend</span>
@@ -69,7 +76,9 @@
         <button class="chart-btn" data-days="30">30d</button>
     </div>
 </div>
-<div class="route-charts-grid" id="routeCharts"></div>
+<div class="route-charts-grid" id="routeCharts">
+    <div class="loading">Laden...</div>
+</div>
 
 <!-- Flight Table -->
 <div class="card flights-card">
@@ -77,9 +86,8 @@
         <div class="section-header" style="margin-bottom:0;">
             <span class="section-title">Vluchten</span>
             <form method="GET" class="date-filter">
-                <label for="date">Datum:</label>
-                <input type="date" id="date" name="date" value="{{ date_filter }}">
-                <button class="btn btn-sm" type="submit">Filter</button>
+                <label for="date">Datum</label>
+                <input type="date" id="date" name="date" value="{{ date_filter }}" onchange="this.form.submit()">
             </form>
         </div>
     </div>
@@ -87,7 +95,10 @@
     {% if flight_groups %}
         {% for route_name, flights in flight_groups.items() %}
         {% set route_id = route_name.split(' → ') %}
-        <div class="flight-group-header" id="route-{{ route_id[0] }}-{{ route_id[1] }}">{{ route_name }} <span style="font-weight:400; color:var(--text-muted);">— {{ flights|length }} vlucht{{ 'en' if flights|length != 1 }}</span></div>
+        <div class="flight-group-header" id="route-{{ route_id[0] }}-{{ route_id[1] }}">
+            {{ route_name }}
+            <span class="flight-group-count">{{ flights|length }} vlucht{{ 'en' if flights|length != 1 }}</span>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -111,8 +122,8 @@
         {% endfor %}
     {% else %}
     <div class="empty">
-        <p>Geen vluchten gevonden voor {{ date_filter }}.</p>
-        <p style="margin-top:0.5rem; font-size:0.85rem;">Druk op "Nu checken" om vluchten op te halen, of voeg eerst <a href="{{ url_for('main.manage_routes') }}">routes</a> toe.</p>
+        <p>Geen vluchten voor {{ date_filter }}</p>
+        <p style="margin-top:0.5rem; font-size:0.85rem;">Druk op "Vluchten checken" of voeg eerst <a href="{{ url_for('main.manage_routes') }}">routes</a> toe.</p>
     </div>
     {% endif %}
 </div>
@@ -125,21 +136,28 @@
 const routeCharts = {};
 
 async function loadTrends(days) {
+    const container = document.getElementById('routeCharts');
+    container.innerHTML = '<div class="loading">Laden...</div>';
+
     const resp = await fetch(`/api/trend?days=${days}`);
     const data = await resp.json();
+    container.innerHTML = '';
 
     const labels = data.dates.map(d => {
         const dt = new Date(d + 'T00:00:00');
         return dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
     });
 
-    const container = document.getElementById('routeCharts');
-    container.innerHTML = '';
-
     // Destroy old charts
     Object.values(routeCharts).forEach(c => c.destroy());
 
-    Object.entries(data.routes).forEach(([routeName, dayData]) => {
+    const routes = Object.entries(data.routes);
+    if (routes.length === 0) {
+        container.innerHTML = '<div class="card"><div class="empty">Nog geen data. Voer eerst een schema check en vlucht check uit.</div></div>';
+        return;
+    }
+
+    routes.forEach(([routeName, dayData]) => {
         const flown = data.dates.map(d => dayData[d]?.flown || 0);
         const cancelled = data.dates.map(d => dayData[d]?.cancelled || 0);
         const scrapped = data.dates.map(d => dayData[d]?.scrapped || 0);
@@ -147,22 +165,27 @@ async function loadTrends(days) {
 
         const card = document.createElement('div');
         card.className = 'card';
-        card.style.padding = '1rem 1.25rem';
-        card.innerHTML = `
-            <div style="font-weight:600; font-size:0.85rem; font-family:'SF Mono','Fira Code',monospace; margin-bottom:0.75rem;">${routeName}</div>
-            <div style="position:relative; height:180px;">
-                <canvas></canvas>
-            </div>
-        `;
+        card.style.cssText = 'padding:1.15rem 1.25rem;';
+
+        const header = document.createElement('div');
+        header.style.cssText = "font-weight:600; font-size:0.82rem; font-family:'SF Mono','Fira Code','Cascadia Code',monospace; margin-bottom:0.75rem; color:var(--text-secondary);";
+        header.textContent = routeName;
+        card.appendChild(header);
+
+        const chartWrap = document.createElement('div');
+        chartWrap.style.cssText = 'position:relative; height:160px;';
+        card.appendChild(chartWrap);
         container.appendChild(card);
 
         if (!hasData) {
-            card.querySelector('div[style*="height"]').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.85rem;">Nog geen data</div>';
+            chartWrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.82rem;">Nog geen data</div>';
             return;
         }
 
-        const ctx = card.querySelector('canvas');
-        routeCharts[routeName] = new Chart(ctx, {
+        const canvas = document.createElement('canvas');
+        chartWrap.appendChild(canvas);
+
+        routeCharts[routeName] = new Chart(canvas, {
             type: 'bar',
             data: {
                 labels,
@@ -170,20 +193,23 @@ async function loadTrends(days) {
                     {
                         label: 'Gevlogen',
                         data: flown,
-                        backgroundColor: '#16a34a',
-                        borderRadius: { topLeft: 2, topRight: 2 },
+                        backgroundColor: '#22c55e',
+                        borderRadius: 2,
+                        borderSkipped: false,
                     },
                     {
                         label: 'Gecanceld',
                         data: cancelled,
-                        backgroundColor: '#eab308',
-                        borderRadius: { topLeft: 2, topRight: 2 },
+                        backgroundColor: '#facc15',
+                        borderRadius: 2,
+                        borderSkipped: false,
                     },
                     {
                         label: 'Geschrapt',
                         data: scrapped,
-                        backgroundColor: '#dc2626',
-                        borderRadius: { topLeft: 2, topRight: 2 },
+                        backgroundColor: '#ef4444',
+                        borderRadius: 2,
+                        borderSkipped: false,
                     },
                 ],
             },
@@ -192,25 +218,21 @@ async function loadTrends(days) {
                 maintainAspectRatio: false,
                 plugins: {
                     legend: {
-                        position: 'bottom',
-                        labels: {
-                            usePointStyle: true,
-                            pointStyle: 'rectRounded',
-                            padding: 12,
-                            font: { size: 11 },
-                        },
+                        display: false,
                     },
                     tooltip: {
-                        backgroundColor: '#1e293b',
-                        titleFont: { size: 12 },
+                        backgroundColor: 'rgba(15,23,42,0.95)',
+                        titleFont: { size: 12, weight: '600' },
                         bodyFont: { size: 11 },
-                        padding: 8,
-                        cornerRadius: 6,
+                        padding: 10,
+                        cornerRadius: 8,
+                        displayColors: true,
+                        boxPadding: 4,
                         callbacks: {
                             afterBody: function(items) {
                                 const idx = items[0].dataIndex;
                                 const total = flown[idx] + cancelled[idx] + scrapped[idx];
-                                return `Totaal: ${total}`;
+                                return total > 0 ? `\nTotaal gepland: ${total}` : '';
                             }
                         }
                     },
@@ -220,17 +242,29 @@ async function loadTrends(days) {
                         stacked: true,
                         ticks: { font: { size: 10 }, color: '#94a3b8', maxRotation: 0 },
                         grid: { display: false },
+                        border: { display: false },
                     },
                     y: {
                         stacked: true,
                         beginAtZero: true,
                         ticks: { stepSize: 1, font: { size: 10 }, color: '#94a3b8' },
-                        grid: { color: '#f1f5f9' },
+                        grid: { color: '#f1f5f9', drawBorder: false },
+                        border: { display: false },
                     },
                 },
             },
         });
     });
+
+    // Add shared legend after all charts
+    const legend = document.createElement('div');
+    legend.style.cssText = 'grid-column: 1 / -1; display:flex; justify-content:center; gap:1.5rem; padding:0.5rem 0; font-size:0.75rem; color:var(--text-secondary);';
+    legend.innerHTML = `
+        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#22c55e;display:inline-block;"></span> Gevlogen</span>
+        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#facc15;display:inline-block;"></span> Gecanceld</span>
+        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#ef4444;display:inline-block;"></span> Geschrapt</span>
+    `;
+    container.appendChild(legend);
 }
 
 // Chart control buttons
