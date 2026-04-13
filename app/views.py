@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, render_template, request, redirect, url_for, session, jsonify
 from app.db import get_db
 from app.auth import login_required, check_password
-from app.airlabs import fetch_schedules
+from app.airlabs import fetch_schedules, fetch_routes
 
 bp = Blueprint("main", __name__)
 
@@ -77,6 +77,13 @@ def dashboard():
 
         trend = _calc_trend(db, r["id"], today_str)
 
+        # Latest schema snapshot
+        snapshot = db.execute(
+            "SELECT planned_count FROM route_snapshots WHERE route_id = ? ORDER BY date DESC LIMIT 1",
+            (r["id"],),
+        ).fetchone()
+        planned_count = snapshot["planned_count"] if snapshot else 0
+
         route_cards.append({
             "id": r["id"],
             "name": route_name,
@@ -84,6 +91,7 @@ def dashboard():
             "destination": r["destination"],
             "airline": r["airline"] or "",
             "today_count": today_count,
+            "planned_count": planned_count,
             "sparkline": sparkline,
             "trend": trend,
         })
@@ -134,33 +142,95 @@ def dashboard():
 @bp.route("/api/trend")
 @login_required
 def trend_api():
+    """Stacked bar data per route: planned vs flown vs cancelled."""
     db = get_db()
     days = min(int(request.args.get("days", 7)), 90)
     today_str = date.today().isoformat()
 
     routes = db.execute("SELECT * FROM routes ORDER BY origin, destination").fetchall()
-    result = {}
-
-    for r in routes:
-        route_name = f"{r['origin']} → {r['destination']}"
-        rows = db.execute("""
-            SELECT date, COUNT(*) as cnt FROM flights
-            WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata != ''
-            GROUP BY date ORDER BY date
-        """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
-        result[route_name] = {row["date"]: row["cnt"] for row in rows}
 
     all_dates = []
     for i in range(days - 1, -1, -1):
-        d = (date.today() - timedelta(days=i)).isoformat()
-        all_dates.append(d)
+        all_dates.append((date.today() - timedelta(days=i)).isoformat())
 
-    for route_name in result:
+    result = {}
+    for r in routes:
+        route_name = f"{r['origin']} → {r['destination']}"
+
+        # Planned counts from route_snapshots
+        snapshots = db.execute("""
+            SELECT date, planned_count FROM route_snapshots
+            WHERE route_id = ? AND date >= date(?, ?) AND date <= ?
+            ORDER BY date
+        """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
+        planned_map = {row["date"]: row["planned_count"] for row in snapshots}
+
+        # Actual flights per day (with code only)
+        actuals = db.execute("""
+            SELECT date, status, COUNT(*) as cnt FROM flights
+            WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata != ''
+            GROUP BY date, status ORDER BY date
+        """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
+
+        # Build per-day counts
+        day_data = {}
+        for row in actuals:
+            d = row["date"]
+            if d not in day_data:
+                day_data[d] = {"flown": 0, "cancelled": 0}
+            if row["status"] == "cancelled":
+                day_data[d]["cancelled"] += row["cnt"]
+            else:
+                day_data[d]["flown"] += row["cnt"]
+
+        route_days = {}
         for d in all_dates:
-            if d not in result[route_name]:
-                result[route_name][d] = 0
+            planned = planned_map.get(d, 0)
+            flown = day_data.get(d, {}).get("flown", 0)
+            cancelled = day_data.get(d, {}).get("cancelled", 0)
+            # Scrapped = planned minus what we actually saw (flown + cancelled)
+            actual_total = flown + cancelled
+            scrapped = max(0, planned - actual_total) if planned > 0 else 0
+
+            route_days[d] = {
+                "planned": planned,
+                "flown": flown,
+                "cancelled": cancelled,
+                "scrapped": scrapped,
+            }
+
+        result[route_name] = route_days
 
     return jsonify({"dates": all_dates, "routes": result})
+
+
+@bp.route("/check-schema", methods=["POST"])
+@login_required
+def manual_schema_check():
+    """Trigger a manual schema check for all routes."""
+    db = get_db()
+    routes = db.execute("SELECT * FROM routes").fetchall()
+    today = date.today().isoformat()
+
+    for route in routes:
+        planned = fetch_routes(route["origin"], route["destination"])
+        flight_numbers = [f.get("flight_iata", "") for f in planned]
+
+        db.execute("""
+            INSERT INTO route_snapshots (route_id, date, planned_count, flight_numbers)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(route_id, date)
+            DO UPDATE SET planned_count=excluded.planned_count,
+                         flight_numbers=excluded.flight_numbers,
+                         checked_at=CURRENT_TIMESTAMP
+        """, (
+            route["id"], today,
+            len(planned),
+            json.dumps(flight_numbers),
+        ))
+
+    db.commit()
+    return redirect(url_for("main.dashboard"))
 
 
 @bp.route("/routes", methods=["GET", "POST"])

@@ -11,12 +11,20 @@
         </p>
         {% endif %}
     </div>
-    <form method="POST" action="{{ url_for('main.manual_check') }}">
-        <button class="btn btn-primary" type="submit">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"/></svg>
-            Nu checken
-        </button>
-    </form>
+    <div style="display:flex; gap:0.5rem;">
+        <form method="POST" action="{{ url_for('main.manual_schema_check') }}">
+            <button class="btn" type="submit">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                Schema check
+            </button>
+        </form>
+        <form method="POST" action="{{ url_for('main.manual_check') }}">
+            <button class="btn btn-primary" type="submit">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"/></svg>
+                Nu checken
+            </button>
+        </form>
+    </div>
 </div>
 
 <!-- Route Summary Cards -->
@@ -30,7 +38,12 @@
             <span class="route-name">{{ rc.origin }} → {{ rc.destination }}</span>
             {% if rc.airline %}<span class="route-airline">{{ rc.airline }}</span>{% endif %}
         </div>
-        <div class="route-count">{{ rc.today_count }}</div>
+        <div style="display:flex; align-items:baseline; gap:0.5rem;">
+            <div class="route-count">{{ rc.today_count }}</div>
+            {% if rc.planned_count > 0 %}
+            <div style="font-size:0.85rem; color:var(--text-muted);">/ {{ rc.planned_count }} gepland</div>
+            {% endif %}
+        </div>
         <div class="route-count-label">vluchten {{ 'vandaag' if date_filter == today else date_filter }}</div>
         <div class="route-footer">
             {% if rc.trend == 'up' %}
@@ -42,26 +55,21 @@
             {% else %}
             <span class="trend-badge trend-new">Nieuw</span>
             {% endif %}
-            <canvas class="sparkline" data-values="{{ rc.sparkline | tojson }}"></canvas>
         </div>
     </a>
     {% endfor %}
 </div>
 
-<!-- Trend Chart -->
-<div class="card chart-card">
-    <div class="section-header" style="margin-bottom:0;">
-        <span class="section-title">Trend</span>
-        <div class="chart-controls">
-            <button class="chart-btn active" data-days="7">7d</button>
-            <button class="chart-btn" data-days="14">14d</button>
-            <button class="chart-btn" data-days="30">30d</button>
-        </div>
-    </div>
-    <div class="chart-container">
-        <canvas id="trendChart"></canvas>
+<!-- Per-route Stacked Bar Charts -->
+<div class="section-header">
+    <span class="section-title">Trend per route</span>
+    <div class="chart-controls">
+        <button class="chart-btn active" data-days="7">7d</button>
+        <button class="chart-btn" data-days="14">14d</button>
+        <button class="chart-btn" data-days="30">30d</button>
     </div>
 </div>
+<div class="route-charts-grid" id="routeCharts"></div>
 
 <!-- Flight Table -->
 <div class="card flights-card">
@@ -114,46 +122,9 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
-// --- Sparklines ---
-document.querySelectorAll('.sparkline').forEach(canvas => {
-    const values = JSON.parse(canvas.dataset.values);
-    if (values.length < 2) return;
+const routeCharts = {};
 
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width = canvas.offsetWidth * 2;
-    const h = canvas.height = canvas.offsetHeight * 2;
-    canvas.style.width = canvas.offsetWidth + 'px';
-    canvas.style.height = canvas.offsetHeight + 'px';
-
-    const max = Math.max(...values, 1);
-    const min = Math.min(...values, 0);
-    const range = max - min || 1;
-    const step = w / (values.length - 1);
-    const pad = 4;
-
-    ctx.beginPath();
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-
-    values.forEach((v, i) => {
-        const x = i * step;
-        const y = h - pad - ((v - min) / range) * (h - pad * 2);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-});
-
-// --- Trend Chart ---
-const COLORS = [
-    '#2563eb', '#16a34a', '#dc2626', '#ca8a04',
-    '#7c3aed', '#0891b2', '#be185d', '#ea580c', '#4f46e5'
-];
-
-let trendChart = null;
-
-async function loadTrend(days) {
+async function loadTrends(days) {
     const resp = await fetch(`/api/trend?days=${days}`);
     const data = await resp.json();
 
@@ -162,68 +133,103 @@ async function loadTrend(days) {
         return dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
     });
 
-    const datasets = Object.entries(data.routes).map(([name, values], i) => ({
-        label: name,
-        data: data.dates.map(d => values[d] || 0),
-        borderColor: COLORS[i % COLORS.length],
-        backgroundColor: COLORS[i % COLORS.length] + '15',
-        borderWidth: 2,
-        tension: 0.3,
-        fill: false,
-        pointRadius: days <= 14 ? 3 : 0,
-        pointHoverRadius: 5,
-    }));
+    const container = document.getElementById('routeCharts');
+    container.innerHTML = '';
 
-    if (trendChart) trendChart.destroy();
+    // Destroy old charts
+    Object.values(routeCharts).forEach(c => c.destroy());
 
-    trendChart = new Chart(document.getElementById('trendChart'), {
-        type: 'line',
-        data: { labels, datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false,
+    Object.entries(data.routes).forEach(([routeName, dayData]) => {
+        const flown = data.dates.map(d => dayData[d]?.flown || 0);
+        const cancelled = data.dates.map(d => dayData[d]?.cancelled || 0);
+        const scrapped = data.dates.map(d => dayData[d]?.scrapped || 0);
+        const hasData = flown.some(v => v > 0) || cancelled.some(v => v > 0) || scrapped.some(v => v > 0);
+
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.padding = '1rem 1.25rem';
+        card.innerHTML = `
+            <div style="font-weight:600; font-size:0.85rem; font-family:'SF Mono','Fira Code',monospace; margin-bottom:0.75rem;">${routeName}</div>
+            <div style="position:relative; height:180px;">
+                <canvas></canvas>
+            </div>
+        `;
+        container.appendChild(card);
+
+        if (!hasData) {
+            card.querySelector('div[style*="height"]').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.85rem;">Nog geen data</div>';
+            return;
+        }
+
+        const ctx = card.querySelector('canvas');
+        routeCharts[routeName] = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Gevlogen',
+                        data: flown,
+                        backgroundColor: '#16a34a',
+                        borderRadius: { topLeft: 2, topRight: 2 },
+                    },
+                    {
+                        label: 'Gecanceld',
+                        data: cancelled,
+                        backgroundColor: '#eab308',
+                        borderRadius: { topLeft: 2, topRight: 2 },
+                    },
+                    {
+                        label: 'Geschrapt',
+                        data: scrapped,
+                        backgroundColor: '#dc2626',
+                        borderRadius: { topLeft: 2, topRight: 2 },
+                    },
+                ],
             },
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: {
-                        usePointStyle: true,
-                        pointStyle: 'circle',
-                        padding: 16,
-                        font: { size: 12 },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'rectRounded',
+                            padding: 12,
+                            font: { size: 11 },
+                        },
+                    },
+                    tooltip: {
+                        backgroundColor: '#1e293b',
+                        titleFont: { size: 12 },
+                        bodyFont: { size: 11 },
+                        padding: 8,
+                        cornerRadius: 6,
+                        callbacks: {
+                            afterBody: function(items) {
+                                const idx = items[0].dataIndex;
+                                const total = flown[idx] + cancelled[idx] + scrapped[idx];
+                                return `Totaal: ${total}`;
+                            }
+                        }
                     },
                 },
-                tooltip: {
-                    backgroundColor: '#1e293b',
-                    titleFont: { size: 13 },
-                    bodyFont: { size: 12 },
-                    padding: 10,
-                    cornerRadius: 8,
+                scales: {
+                    x: {
+                        stacked: true,
+                        ticks: { font: { size: 10 }, color: '#94a3b8', maxRotation: 0 },
+                        grid: { display: false },
+                    },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        ticks: { stepSize: 1, font: { size: 10 }, color: '#94a3b8' },
+                        grid: { color: '#f1f5f9' },
+                    },
                 },
             },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1,
-                        font: { size: 11 },
-                        color: '#94a3b8',
-                    },
-                    grid: { color: '#f1f5f9' },
-                },
-                x: {
-                    ticks: {
-                        font: { size: 11 },
-                        color: '#94a3b8',
-                        maxRotation: 0,
-                    },
-                    grid: { display: false },
-                },
-            },
-        },
+        });
     });
 }
 
@@ -232,10 +238,10 @@ document.querySelectorAll('.chart-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.chart-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        loadTrend(parseInt(btn.dataset.days));
+        loadTrends(parseInt(btn.dataset.days));
     });
 });
 
-loadTrend(7);
+loadTrends(7);
 </script>
 {% endblock %}

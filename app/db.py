@@ -54,6 +54,16 @@ def init_db(app):
             flights_found INTEGER DEFAULT 0,
             source TEXT DEFAULT 'scheduler'
         );
+        CREATE TABLE IF NOT EXISTS route_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+            date DATE NOT NULL,
+            planned_count INTEGER DEFAULT 0,
+            flight_numbers TEXT,
+            checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(route_id, date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_snapshots_route_date ON route_snapshots(route_id, date);
     """)
     # Migration: add arr_time_utc column if missing
     columns = [row[1] for row in conn.execute("PRAGMA table_info(flights)").fetchall()]
