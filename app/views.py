@@ -98,8 +98,17 @@ def dashboard():
     """, (date_filter,)).fetchall()
 
     flight_groups = {}
+    seen = set()
     for f in flights:
         route_name = f"{f['origin']} → {f['destination']}"
+
+        # Deduplicate flights without a code that have the same times
+        if not f["flight_iata"]:
+            key = (route_name, f["dep_time"], f["arr_time"])
+            if key in seen:
+                continue
+            seen.add(key)
+
         if route_name not in flight_groups:
             flight_groups[route_name] = []
 
