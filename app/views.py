@@ -286,7 +286,7 @@ def trend_api():
                 day_data[d] = {"flown": 0, "cancelled": 0}
             if row["status"] == "cancelled":
                 day_data[d]["cancelled"] += row["cnt"]
-            else:
+            elif row["status"] in ("landed", "active", "probably_landed"):
                 day_data[d]["flown"] += row["cnt"]
 
         route_days = {}
