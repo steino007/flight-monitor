@@ -237,82 +237,73 @@ def trend_api():
             ORDER BY date
         """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
 
-        # Build planned_map: for each date, count flights expected on that weekday
-        planned_map = {}
+        # Build planned_flights: for each date, the set of planned flight numbers
+        planned_flights = {}
         last_snapshot_data = None
         for snap in snapshots:
             snap_data = _parse_snapshot(snap["flight_numbers"])
             last_snapshot_data = snap_data
             snap_day = DAY_NAMES[date.fromisoformat(snap["date"]).weekday()]
-            planned_map[snap["date"]] = sum(
-                1 for info in snap_data.values()
+            planned_flights[snap["date"]] = {
+                iata for iata, info in snap_data.items()
                 if not info.get("days") or snap_day in info["days"]
-            )
+            }
 
         # Fill dates without snapshots using nearest earlier snapshot
         for d in all_dates:
-            if d not in planned_map and last_snapshot_data:
+            if d not in planned_flights and last_snapshot_data:
                 d_day = DAY_NAMES[date.fromisoformat(d).weekday()]
-                # Find most recent snapshot before this date
                 nearest = None
                 for snap in snapshots:
                     if snap["date"] <= d:
                         nearest = snap
                 if nearest:
                     snap_data = _parse_snapshot(nearest["flight_numbers"])
-                    planned_map[d] = sum(
-                        1 for info in snap_data.values()
+                    planned_flights[d] = {
+                        iata for iata, info in snap_data.items()
                         if not info.get("days") or d_day in info["days"]
-                    )
+                    }
 
-        # Actual flights per day
-        if airline:
-            actuals = db.execute("""
-                SELECT date, status, COUNT(*) as cnt FROM flights
-                WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata LIKE ?
-                GROUP BY date, status ORDER BY date
-            """, (r["id"], today_str, f"-{days-1} days", today_str, f"{airline}%")).fetchall()
-        else:
-            actuals = db.execute("""
-                SELECT date, status, COUNT(*) as cnt FROM flights
-                WHERE route_id = ? AND date >= date(?, ?) AND date <= ? AND flight_iata != ''
-                GROUP BY date, status ORDER BY date
-            """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
+        # Get individual flight statuses (not aggregated)
+        flight_rows = db.execute("""
+            SELECT date, flight_iata, status FROM flights
+            WHERE route_id = ? AND date >= date(?, ?) AND date <= ?
+        """, (r["id"], today_str, f"-{days-1} days", today_str)).fetchall()
 
-        day_data = {}
-        for row in actuals:
-            d = row["date"]
-            if d not in day_data:
-                day_data[d] = {"flown": 0, "cancelled": 0, "pending": 0}
-            if row["status"] == "cancelled":
-                day_data[d]["cancelled"] += row["cnt"]
-            elif row["status"] in ("landed", "probably_landed"):
-                day_data[d]["flown"] += row["cnt"]
-            elif row["status"] in ("scheduled", "active"):
-                day_data[d]["pending"] += row["cnt"]
+        # Build lookup: date → {flight_iata: status}
+        flight_status = {}
+        for row in flight_rows:
+            flight_status.setdefault(row["date"], {})[row["flight_iata"]] = row["status"]
 
+        # Per date: categorise each planned flight individually
         route_days = {}
         for d in all_dates:
-            planned = planned_map.get(d, 0)
-            flown = day_data.get(d, {}).get("flown", 0)
-            cancelled = day_data.get(d, {}).get("cancelled", 0)
-            pending = day_data.get(d, {}).get("pending", 0)
-            known_total = flown + cancelled + pending
-            remaining = max(0, planned - known_total) if planned > 0 else 0
+            planned = planned_flights.get(d, set())
+            statuses = flight_status.get(d, {})
+            flown = 0
+            cancelled = 0
+            pending = 0
 
-            # Past dates: remaining flights are definitively not flown (red)
-            # Today and future: remaining flights are still pending (grey)
-            if d < today_str:
-                scrapped = remaining
-            else:
-                pending += remaining
-                scrapped = 0
+            for iata in planned:
+                status = statuses.get(iata)
+                if status in ("landed", "probably_landed"):
+                    flown += 1
+                elif status == "cancelled":
+                    cancelled += 1
+                elif status in ("scheduled", "active"):
+                    pending += 1
+                elif status is None:
+                    # Not in flights table: past = not flown, today = pending
+                    if d < today_str:
+                        cancelled += 1
+                    else:
+                        pending += 1
 
             route_days[d] = {
-                "planned": planned,
+                "planned": len(planned),
                 "flown": flown,
                 "cancelled": cancelled,
-                "scrapped": scrapped,
+                "scrapped": 0,
                 "pending": pending,
             }
 
