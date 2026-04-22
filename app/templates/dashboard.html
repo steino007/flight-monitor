@@ -75,10 +75,11 @@
             <button class="chart-btn mode-btn active" data-mode="flights">Vluchten</button>
             <button class="chart-btn mode-btn" data-mode="schema">Weekcapaciteit</button>
         </div>
-        <div class="chart-controls" id="daysControls">
+        <div class="chart-controls">
             <button class="chart-btn days-btn active" data-days="7">7d</button>
             <button class="chart-btn days-btn" data-days="14">14d</button>
             <button class="chart-btn days-btn" data-days="30">30d</button>
+            <button class="chart-btn days-btn" data-days="0">Alles</button>
         </div>
     </div>
 </div>
@@ -237,10 +238,10 @@ async function loadFlightCharts(days) {
     container.appendChild(legend);
 }
 
-async function loadSchemaCharts() {
+async function loadSchemaCharts(days) {
     const container = document.getElementById('routeCharts');
     container.innerHTML = '<div class="loading">Laden...</div>';
-    const resp = await fetch('/api/schema-trend');
+    const resp = await fetch(`/api/schema-trend?days=${days}`);
     const data = await resp.json();
     container.innerHTML = '';
     destroyCharts();
@@ -307,12 +308,9 @@ async function loadSchemaCharts() {
 }
 
 function loadCharts() {
-    const daysControls = document.getElementById('daysControls');
     if (currentMode === 'schema') {
-        daysControls.style.display = 'none';
-        loadSchemaCharts();
+        loadSchemaCharts(currentDays);
     } else {
-        daysControls.style.display = 'flex';
         loadFlightCharts(currentDays);
     }
 }

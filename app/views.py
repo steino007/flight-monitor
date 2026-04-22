@@ -323,16 +323,24 @@ NL_DAYS = {"mon": "ma", "tue": "di", "wed": "wo", "thu": "do", "fri": "vr", "sat
 def schema_trend_api():
     """Weekly departure capacity per route over time from snapshots."""
     db = get_db()
+    days = int(request.args.get("days", 0))
+    today_str = date.today().isoformat()
     routes = db.execute("SELECT * FROM routes ORDER BY origin, destination").fetchall()
 
     result = {}
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
 
-        snapshots = db.execute("""
-            SELECT date, flight_numbers FROM route_snapshots
-            WHERE route_id = ? ORDER BY date
-        """, (r["id"],)).fetchall()
+        if days > 0:
+            snapshots = db.execute("""
+                SELECT date, flight_numbers FROM route_snapshots
+                WHERE route_id = ? AND date >= date(?, ?) ORDER BY date
+            """, (r["id"], today_str, f"-{days-1} days")).fetchall()
+        else:
+            snapshots = db.execute("""
+                SELECT date, flight_numbers FROM route_snapshots
+                WHERE route_id = ? ORDER BY date
+            """, (r["id"],)).fetchall()
 
         dates = []
         capacities = []
