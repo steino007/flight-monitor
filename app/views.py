@@ -283,25 +283,29 @@ def trend_api():
         for row in actuals:
             d = row["date"]
             if d not in day_data:
-                day_data[d] = {"flown": 0, "cancelled": 0}
+                day_data[d] = {"flown": 0, "cancelled": 0, "pending": 0}
             if row["status"] == "cancelled":
                 day_data[d]["cancelled"] += row["cnt"]
-            elif row["status"] in ("landed", "active", "probably_landed"):
+            elif row["status"] in ("landed", "probably_landed"):
                 day_data[d]["flown"] += row["cnt"]
+            elif row["status"] in ("scheduled", "active"):
+                day_data[d]["pending"] += row["cnt"]
 
         route_days = {}
         for d in all_dates:
             planned = planned_map.get(d, 0)
             flown = day_data.get(d, {}).get("flown", 0)
             cancelled = day_data.get(d, {}).get("cancelled", 0)
-            actual_total = flown + cancelled
-            scrapped = max(0, planned - actual_total) if planned > 0 else 0
+            pending = day_data.get(d, {}).get("pending", 0)
+            known_total = flown + cancelled + pending
+            scrapped = max(0, planned - known_total) if planned > 0 else 0
 
             route_days[d] = {
                 "planned": planned,
                 "flown": flown,
                 "cancelled": cancelled,
                 "scrapped": scrapped,
+                "pending": pending,
             }
 
         result[route_name] = route_days

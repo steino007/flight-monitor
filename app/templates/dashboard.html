@@ -163,9 +163,9 @@ async function loadTrends(days) {
 
     routes.forEach(([routeName, dayData]) => {
         const flown = data.dates.map(d => dayData[d]?.flown || 0);
-        const cancelled = data.dates.map(d => dayData[d]?.cancelled || 0);
-        const scrapped = data.dates.map(d => dayData[d]?.scrapped || 0);
-        const hasData = flown.some(v => v > 0) || cancelled.some(v => v > 0) || scrapped.some(v => v > 0);
+        const notFlown = data.dates.map(d => (dayData[d]?.cancelled || 0) + (dayData[d]?.scrapped || 0));
+        const pending = data.dates.map(d => dayData[d]?.pending || 0);
+        const hasData = flown.some(v => v > 0) || notFlown.some(v => v > 0) || pending.some(v => v > 0);
 
         const card = document.createElement('div');
         card.className = 'card';
@@ -202,15 +202,15 @@ async function loadTrends(days) {
                         borderSkipped: false,
                     },
                     {
-                        label: 'Gecanceld',
-                        data: cancelled,
-                        backgroundColor: '#facc15',
+                        label: 'Nog niet bekend',
+                        data: pending,
+                        backgroundColor: '#94a3b8',
                         borderRadius: 2,
                         borderSkipped: false,
                     },
                     {
-                        label: 'Geschrapt',
-                        data: scrapped,
+                        label: 'Niet gevlogen',
+                        data: notFlown,
                         backgroundColor: '#ef4444',
                         borderRadius: 2,
                         borderSkipped: false,
@@ -235,7 +235,7 @@ async function loadTrends(days) {
                         callbacks: {
                             afterBody: function(items) {
                                 const idx = items[0].dataIndex;
-                                const total = flown[idx] + cancelled[idx] + scrapped[idx];
+                                const total = flown[idx] + notFlown[idx] + pending[idx];
                                 return total > 0 ? `\nTotaal gepland: ${total}` : '';
                             }
                         }
@@ -265,8 +265,8 @@ async function loadTrends(days) {
     legend.style.cssText = 'grid-column: 1 / -1; display:flex; justify-content:center; gap:1.5rem; padding:0.5rem 0; font-size:0.75rem; color:var(--text-secondary);';
     legend.innerHTML = `
         <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#22c55e;display:inline-block;"></span> Gevlogen</span>
-        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#facc15;display:inline-block;"></span> Gecanceld</span>
-        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#ef4444;display:inline-block;"></span> Geschrapt</span>
+        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#94a3b8;display:inline-block;"></span> Nog niet bekend</span>
+        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#ef4444;display:inline-block;"></span> Niet gevlogen</span>
     `;
     container.appendChild(legend);
 }
