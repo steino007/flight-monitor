@@ -298,7 +298,15 @@ def trend_api():
             cancelled = day_data.get(d, {}).get("cancelled", 0)
             pending = day_data.get(d, {}).get("pending", 0)
             known_total = flown + cancelled + pending
-            scrapped = max(0, planned - known_total) if planned > 0 else 0
+            remaining = max(0, planned - known_total) if planned > 0 else 0
+
+            # Past dates: remaining flights are definitively not flown (red)
+            # Today and future: remaining flights are still pending (grey)
+            if d < today_str:
+                scrapped = remaining
+            else:
+                pending += remaining
+                scrapped = 0
 
             route_days[d] = {
                 "planned": planned,
