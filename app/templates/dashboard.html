@@ -70,22 +70,20 @@
 <!-- Per-route Stacked Bar Charts -->
 <div class="section-header">
     <span class="section-title">Trend per route</span>
-    <div class="chart-controls">
-        <button class="chart-btn active" data-days="7">7d</button>
-        <button class="chart-btn" data-days="14">14d</button>
-        <button class="chart-btn" data-days="30">30d</button>
+    <div style="display:flex; gap:0.75rem; align-items:center;">
+        <div class="chart-controls">
+            <button class="chart-btn mode-btn active" data-mode="flights">Vluchten</button>
+            <button class="chart-btn mode-btn" data-mode="schema">Weekcapaciteit</button>
+        </div>
+        <div class="chart-controls" id="daysControls">
+            <button class="chart-btn days-btn active" data-days="7">7d</button>
+            <button class="chart-btn days-btn" data-days="14">14d</button>
+            <button class="chart-btn days-btn" data-days="30">30d</button>
+        </div>
     </div>
 </div>
 <div class="route-charts-grid" id="routeCharts">
     <div class="loading">Laden...</div>
-</div>
-
-<!-- Schema Changelog -->
-<div class="section-header">
-    <span class="section-title">Schema wijzigingen</span>
-</div>
-<div class="card" id="changelogCard" style="margin-bottom:2rem;">
-    <div class="loading" style="padding:1rem;">Laden...</div>
 </div>
 
 <!-- Flight Table -->
@@ -146,26 +144,51 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
 const routeCharts = {};
+let currentMode = 'flights';
+let currentDays = 7;
 
-async function loadTrends(days) {
-    const container = document.getElementById('routeCharts');
-    container.innerHTML = '<div class="loading">Laden...</div>';
-
-    const resp = await fetch(`/api/trend?days=${days}`);
-    const data = await resp.json();
-    container.innerHTML = '';
-
-    const labels = data.dates.map(d => {
+function makeLabels(dates) {
+    return dates.map(d => {
         const dt = new Date(d + 'T00:00:00');
         return dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
     });
+}
 
-    // Destroy old charts
+function destroyCharts() {
     Object.values(routeCharts).forEach(c => c.destroy());
+    Object.keys(routeCharts).forEach(k => delete routeCharts[k]);
+}
 
+function createChartCard(container, routeName, chartWrapCallback) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.cssText = 'padding:1.15rem 1.25rem;';
+
+    const header = document.createElement('div');
+    header.style.cssText = "font-weight:600; font-size:0.82rem; font-family:'SF Mono','Fira Code','Cascadia Code',monospace; margin-bottom:0.75rem; color:var(--text-secondary);";
+    header.textContent = routeName;
+    card.appendChild(header);
+
+    const chartWrap = document.createElement('div');
+    chartWrap.style.cssText = 'position:relative; height:160px;';
+    card.appendChild(chartWrap);
+    container.appendChild(card);
+
+    chartWrapCallback(chartWrap);
+}
+
+async function loadFlightCharts(days) {
+    const container = document.getElementById('routeCharts');
+    container.innerHTML = '<div class="loading">Laden...</div>';
+    const resp = await fetch(`/api/trend?days=${days}`);
+    const data = await resp.json();
+    container.innerHTML = '';
+    destroyCharts();
+
+    const labels = makeLabels(data.dates);
     const routes = Object.entries(data.routes);
     if (routes.length === 0) {
-        container.innerHTML = '<div class="card"><div class="empty">Nog geen data. Voer eerst een schema check en vlucht check uit.</div></div>';
+        container.innerHTML = '<div class="card"><div class="empty">Nog geen data.</div></div>';
         return;
     }
 
@@ -175,100 +198,35 @@ async function loadTrends(days) {
         const pending = data.dates.map(d => dayData[d]?.pending || 0);
         const hasData = flown.some(v => v > 0) || notFlown.some(v => v > 0) || pending.some(v => v > 0);
 
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.style.cssText = 'padding:1.15rem 1.25rem;';
-
-        const header = document.createElement('div');
-        header.style.cssText = "font-weight:600; font-size:0.82rem; font-family:'SF Mono','Fira Code','Cascadia Code',monospace; margin-bottom:0.75rem; color:var(--text-secondary);";
-        header.textContent = routeName;
-        card.appendChild(header);
-
-        const chartWrap = document.createElement('div');
-        chartWrap.style.cssText = 'position:relative; height:160px;';
-        card.appendChild(chartWrap);
-        container.appendChild(card);
-
-        if (!hasData) {
-            chartWrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.82rem;">Nog geen data</div>';
-            return;
-        }
-
-        const canvas = document.createElement('canvas');
-        chartWrap.appendChild(canvas);
-
-        routeCharts[routeName] = new Chart(canvas, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: 'Gevlogen',
-                        data: flown,
-                        backgroundColor: '#22c55e',
-                        borderRadius: 2,
-                        borderSkipped: false,
-                    },
-                    {
-                        label: 'Nog niet bekend',
-                        data: pending,
-                        backgroundColor: '#94a3b8',
-                        borderRadius: 2,
-                        borderSkipped: false,
-                    },
-                    {
-                        label: 'Niet gevlogen',
-                        data: notFlown,
-                        backgroundColor: '#ef4444',
-                        borderRadius: 2,
-                        borderSkipped: false,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false,
-                    },
-                    tooltip: {
-                        backgroundColor: 'rgba(15,23,42,0.95)',
-                        titleFont: { size: 12, weight: '600' },
-                        bodyFont: { size: 11 },
-                        padding: 10,
-                        cornerRadius: 8,
-                        displayColors: true,
-                        boxPadding: 4,
-                        callbacks: {
-                            afterBody: function(items) {
-                                const idx = items[0].dataIndex;
-                                const total = flown[idx] + notFlown[idx] + pending[idx];
-                                return total > 0 ? `\nTotaal gepland: ${total}` : '';
-                            }
-                        }
+        createChartCard(container, routeName, (chartWrap) => {
+            if (!hasData) {
+                chartWrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.82rem;">Nog geen data</div>';
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            chartWrap.appendChild(canvas);
+            routeCharts[routeName] = new Chart(canvas, {
+                type: 'bar',
+                data: { labels, datasets: [
+                    { label: 'Gevlogen', data: flown, backgroundColor: '#22c55e', borderRadius: 2, borderSkipped: false },
+                    { label: 'Nog niet bekend', data: pending, backgroundColor: '#94a3b8', borderRadius: 2, borderSkipped: false },
+                    { label: 'Niet gevlogen', data: notFlown, backgroundColor: '#ef4444', borderRadius: 2, borderSkipped: false },
+                ]},
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: {
+                        backgroundColor: 'rgba(15,23,42,0.95)', titleFont: { size: 12, weight: '600' },
+                        bodyFont: { size: 11 }, padding: 10, cornerRadius: 8, displayColors: true, boxPadding: 4,
+                    }},
+                    scales: {
+                        x: { stacked: true, ticks: { font: { size: 10 }, color: '#94a3b8', maxRotation: 0 }, grid: { display: false }, border: { display: false } },
+                        y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 }, color: '#94a3b8' }, grid: { color: '#f1f5f9', drawBorder: false }, border: { display: false } },
                     },
                 },
-                scales: {
-                    x: {
-                        stacked: true,
-                        ticks: { font: { size: 10 }, color: '#94a3b8', maxRotation: 0 },
-                        grid: { display: false },
-                        border: { display: false },
-                    },
-                    y: {
-                        stacked: true,
-                        beginAtZero: true,
-                        ticks: { stepSize: 1, font: { size: 10 }, color: '#94a3b8' },
-                        grid: { color: '#f1f5f9', drawBorder: false },
-                        border: { display: false },
-                    },
-                },
-            },
+            });
         });
     });
 
-    // Add shared legend after all charts
     const legend = document.createElement('div');
     legend.style.cssText = 'grid-column: 1 / -1; display:flex; justify-content:center; gap:1.5rem; padding:0.5rem 0; font-size:0.75rem; color:var(--text-secondary);';
     legend.innerHTML = `
@@ -279,40 +237,106 @@ async function loadTrends(days) {
     container.appendChild(legend);
 }
 
-// Chart control buttons
-document.querySelectorAll('.chart-btn').forEach(btn => {
+async function loadSchemaCharts() {
+    const container = document.getElementById('routeCharts');
+    container.innerHTML = '<div class="loading">Laden...</div>';
+    const resp = await fetch('/api/schema-trend');
+    const data = await resp.json();
+    container.innerHTML = '';
+    destroyCharts();
+
+    const routes = Object.entries(data);
+    if (routes.length === 0) {
+        container.innerHTML = '<div class="card"><div class="empty">Nog geen data.</div></div>';
+        return;
+    }
+
+    routes.forEach(([routeName, routeData]) => {
+        const labels = makeLabels(routeData.dates);
+        const capacity = routeData.capacity;
+        const hasData = capacity.some(v => v > 0);
+
+        createChartCard(container, routeName, (chartWrap) => {
+            if (!hasData) {
+                chartWrap.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.82rem;">Nog geen data</div>';
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            chartWrap.appendChild(canvas);
+
+            const minVal = Math.min(...capacity);
+            const maxVal = Math.max(...capacity);
+            const yMin = Math.max(0, minVal - 3);
+            const yMax = maxVal + 3;
+
+            routeCharts[routeName] = new Chart(canvas, {
+                type: 'line',
+                data: { labels, datasets: [{
+                    label: 'Vertrekken/week',
+                    data: capacity,
+                    borderColor: '#6366f1',
+                    backgroundColor: 'rgba(99,102,241,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#6366f1',
+                    borderWidth: 2,
+                }]},
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: {
+                        backgroundColor: 'rgba(15,23,42,0.95)', titleFont: { size: 12, weight: '600' },
+                        bodyFont: { size: 11 }, padding: 10, cornerRadius: 8,
+                        callbacks: { label: (ctx) => `${ctx.parsed.y} vertrekken/week` },
+                    }},
+                    scales: {
+                        x: { ticks: { font: { size: 10 }, color: '#94a3b8', maxRotation: 0 }, grid: { display: false }, border: { display: false } },
+                        y: { min: yMin, max: yMax, ticks: { stepSize: 1, font: { size: 10 }, color: '#94a3b8' }, grid: { color: '#f1f5f9', drawBorder: false }, border: { display: false } },
+                    },
+                },
+            });
+        });
+    });
+
+    const legend = document.createElement('div');
+    legend.style.cssText = 'grid-column: 1 / -1; display:flex; justify-content:center; gap:1.5rem; padding:0.5rem 0; font-size:0.75rem; color:var(--text-secondary);';
+    legend.innerHTML = `
+        <span style="display:flex;align-items:center;gap:0.35rem;"><span style="width:10px;height:10px;border-radius:2px;background:#6366f1;display:inline-block;"></span> Vertrekken per week (schema)</span>
+    `;
+    container.appendChild(legend);
+}
+
+function loadCharts() {
+    const daysControls = document.getElementById('daysControls');
+    if (currentMode === 'schema') {
+        daysControls.style.display = 'none';
+        loadSchemaCharts();
+    } else {
+        daysControls.style.display = 'flex';
+        loadFlightCharts(currentDays);
+    }
+}
+
+// Mode toggle (Vluchten / Weekcapaciteit)
+document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        document.querySelectorAll('.chart-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        loadTrends(parseInt(btn.dataset.days));
+        currentMode = btn.dataset.mode;
+        loadCharts();
     });
 });
 
-loadTrends(7);
+// Days toggle (7d / 14d / 30d)
+document.querySelectorAll('.days-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.days-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentDays = parseInt(btn.dataset.days);
+        loadCharts();
+    });
+});
 
-// Schema changelog
-(async function() {
-    const card = document.getElementById('changelogCard');
-    const resp = await fetch('/api/changelog');
-    const changes = await resp.json();
-    if (changes.length === 0) {
-        card.innerHTML = '<div style="padding:1rem; color:var(--text-muted); font-size:0.85rem;">Geen wijzigingen gedetecteerd</div>';
-        return;
-    }
-    let html = '<table><thead><tr><th>Datum</th><th>Route</th><th>Vlucht</th><th>Wijziging</th></tr></thead><tbody>';
-    for (const c of changes) {
-        const dt = new Date(c.date + 'T00:00:00');
-        const dateStr = dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
-        const icon = c.type === 'removed' ? '🔴' : c.type === 'added' ? '🟢' : '🟡';
-        html += `<tr>
-            <td>${dateStr}</td>
-            <td><span class="flight-code">${c.route}</span></td>
-            <td><span class="flight-code">${c.flight}</span></td>
-            <td>${icon} ${c.detail}</td>
-        </tr>`;
-    }
-    html += '</tbody></table>';
-    card.innerHTML = html;
-})();
+loadCharts();
 </script>
 {% endblock %}

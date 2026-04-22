@@ -318,68 +318,37 @@ def trend_api():
 NL_DAYS = {"mon": "ma", "tue": "di", "wed": "wo", "thu": "do", "fri": "vr", "sat": "za", "sun": "zo"}
 
 
-@bp.route("/api/changelog")
+@bp.route("/api/schema-trend")
 @login_required
-def changelog_api():
-    """Compare route snapshots day-over-day and return schedule changes."""
+def schema_trend_api():
+    """Weekly departure capacity per route over time from snapshots."""
     db = get_db()
     routes = db.execute("SELECT * FROM routes ORDER BY origin, destination").fetchall()
-    changes = []
 
+    result = {}
     for r in routes:
         route_name = f"{r['origin']} → {r['destination']}"
+
         snapshots = db.execute("""
             SELECT date, flight_numbers FROM route_snapshots
             WHERE route_id = ? ORDER BY date
         """, (r["id"],)).fetchall()
 
-        for i in range(1, len(snapshots)):
-            prev = _parse_snapshot(snapshots[i - 1]["flight_numbers"])
-            curr = _parse_snapshot(snapshots[i]["flight_numbers"])
-            snap_date = snapshots[i]["date"]
+        dates = []
+        capacities = []
+        for snap in snapshots:
+            snap_data = _parse_snapshot(snap["flight_numbers"])
+            # Sum operating days across all flights = weekly departures
+            weekly = sum(
+                len(info.get("days", [])) or 7
+                for info in snap_data.values()
+            )
+            dates.append(snap["date"])
+            capacities.append(weekly)
 
-            all_flights = set(prev.keys()) | set(curr.keys())
-            for iata in sorted(all_flights):
-                if iata not in prev:
-                    days_nl = ", ".join(NL_DAYS.get(d, d) for d in sorted(curr[iata].get("days", []), key=lambda d: DAY_NAMES.index(d)))
-                    changes.append({
-                        "date": snap_date,
-                        "route": route_name,
-                        "flight": iata,
-                        "type": "added",
-                        "detail": f"Toegevoegd ({curr[iata]['dep_time']})" + (f" — {days_nl}" if days_nl else ""),
-                    })
-                elif iata not in curr:
-                    changes.append({
-                        "date": snap_date,
-                        "route": route_name,
-                        "flight": iata,
-                        "type": "removed",
-                        "detail": "Verwijderd uit schema",
-                    })
-                else:
-                    prev_days = set(prev[iata].get("days", []))
-                    curr_days = set(curr[iata].get("days", []))
-                    if prev_days != curr_days:
-                        added_days = curr_days - prev_days
-                        removed_days = prev_days - curr_days
-                        parts = []
-                        if removed_days:
-                            days_nl = ", ".join(NL_DAYS.get(d, d) for d in sorted(removed_days, key=lambda d: DAY_NAMES.index(d)))
-                            parts.append(f"−{days_nl}")
-                        if added_days:
-                            days_nl = ", ".join(NL_DAYS.get(d, d) for d in sorted(added_days, key=lambda d: DAY_NAMES.index(d)))
-                            parts.append(f"+{days_nl}")
-                        changes.append({
-                            "date": snap_date,
-                            "route": route_name,
-                            "flight": iata,
-                            "type": "days_changed",
-                            "detail": "Dagen gewijzigd: " + "  ".join(parts),
-                        })
+        result[route_name] = {"dates": dates, "capacity": capacities}
 
-    changes.sort(key=lambda c: c["date"], reverse=True)
-    return jsonify(changes)
+    return jsonify(result)
 
 
 @bp.route("/check-schema", methods=["POST"])
