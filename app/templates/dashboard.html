@@ -80,6 +80,14 @@
     <div class="loading">Laden...</div>
 </div>
 
+<!-- Schema Changelog -->
+<div class="section-header">
+    <span class="section-title">Schema wijzigingen</span>
+</div>
+<div class="card" id="changelogCard" style="margin-bottom:2rem;">
+    <div class="loading" style="padding:1rem;">Laden...</div>
+</div>
+
 <!-- Flight Table -->
 <div class="card flights-card">
     <div class="flights-card-header">
@@ -281,5 +289,30 @@ document.querySelectorAll('.chart-btn').forEach(btn => {
 });
 
 loadTrends(7);
+
+// Schema changelog
+(async function() {
+    const card = document.getElementById('changelogCard');
+    const resp = await fetch('/api/changelog');
+    const changes = await resp.json();
+    if (changes.length === 0) {
+        card.innerHTML = '<div style="padding:1rem; color:var(--text-muted); font-size:0.85rem;">Geen wijzigingen gedetecteerd</div>';
+        return;
+    }
+    let html = '<table><thead><tr><th>Datum</th><th>Route</th><th>Vlucht</th><th>Wijziging</th></tr></thead><tbody>';
+    for (const c of changes) {
+        const dt = new Date(c.date + 'T00:00:00');
+        const dateStr = dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+        const icon = c.type === 'removed' ? '🔴' : c.type === 'added' ? '🟢' : '🟡';
+        html += `<tr>
+            <td>${dateStr}</td>
+            <td><span class="flight-code">${c.route}</span></td>
+            <td><span class="flight-code">${c.flight}</span></td>
+            <td>${icon} ${c.detail}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    card.innerHTML = html;
+})();
 </script>
 {% endblock %}
