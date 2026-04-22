@@ -284,7 +284,10 @@ def trend_api():
             cancelled = 0
             pending = 0
 
-            for iata in planned:
+            # All flights to categorise: planned + any extras from DB
+            all_flights = planned | set(statuses.keys())
+
+            for iata in all_flights:
                 status = statuses.get(iata)
                 if status in ("landed", "probably_landed"):
                     flown += 1
